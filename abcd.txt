@@ -1,0 +1,101 @@
+================================================================================
+MINICOMMERCE V1 LABORATORY - STEP-BY-STEP WORK LOG (abcd.txt)
+================================================================================
+
+[STEP 1: ARCHITECTURE DESIGN & PROJECT SETUP]
+- Problem: Build a clean, multi-layered FastAPI backend with PostgreSQL/SQLAlchemy 2.x, Alembic, JWT Auth, Cart management, Atomic Checkout transactions, and a Vanilla JS SPA frontend.
+- Solution Implemented:
+  * Created project structure adhering to strict separation of concerns:
+    - Router Layer (thin endpoints in app/api/v1/)
+    - Service Layer (business logic in app/services/)
+    - Model Layer (SQLAlchemy 2.x declarative models in app/models/)
+    - Schema Layer (Pydantic models in app/schemas/)
+  * Implemented Request ID tracking middleware and structured access logging middleware.
+
+[STEP 2: DEPENDENCY & ENVIRONMENT CONFIGURATION]
+- Problem: Ensure reproducible virtual environment and package dependencies.
+- Solution Implemented:
+  * Created python virtual environment (.venv) inside backend/.venv.
+  * Installed dependencies: fastapi, uvicorn, sqlalchemy, alembic, asyncpg, psycopg2-binary, bcrypt, pyjwt, pydantic-settings, email-validator, pytest, httpx.
+  * Resolved passlib/bcrypt 5.0 compatibility by implementing direct bcrypt password hashing routines.
+
+[STEP 3: SUPABASE POSTGRESQL CONNECTION & RESOLUTION]
+- Problem: Connect FastAPI backend to Supabase managed PostgreSQL database. Direct hostname db.[ref].supabase.co uses IPv6-only DNS AAAA records on some networks, causing socket.gaierror [Errno 11003]. Additionally, special characters like '@' in database passwords break connection string parsing.
+- Solution Implemented:
+  * Configured connection pooler URL using Supabase IPv4 Pooler hostname:
+    aws-0-ap-south-1.pooler.supabase.com:6543
+  * Formatted username with project reference: postgres.ehnadqstbnlfixhpibuu
+  * URL-encoded special characters in password ('@' -> '%40'):
+    MiniCommerceDB%40123%40123%40123
+  * Saved full connection string in backend/.env:
+    DATABASE_URL=postgresql+asyncpg://postgres.ehnadqstbnlfixhpibuu:MiniCommerceDB%40123%40123%40123@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
+
+[STEP 4: PGBOUNCER TRANSACTION POOLER COMPATIBILITY]
+- Problem: Uvicorn startup raised asyncpg.exceptions.DuplicatePreparedStatementError: prepared statement "__asyncpg_stmt_1__" already exists when executing against Supabase PgBouncer pooler (port 6543).
+- Solution Implemented:
+  * Configured app/db/session.py connect_args:
+    statement_cache_size = 0
+    prepared_statement_cache_size = 0
+  * Disabling statement caching enables seamless compatibility with PgBouncer transaction mode connection poolers.
+
+[STEP 5: SUPABASE DATABASE SCHEMA CREATION & SIMULATED SEEDING]
+- Problem: Create every database table on live Supabase PostgreSQL and populate simulated rows for testing.
+- Solution Implemented:
+  * Executed app/db/seed.py against Supabase PostgreSQL:
+    1. users table created & seeded:
+       - alice@example.com (Password123!)
+       - bob@example.com (Password123!)
+       - charlie@example.com (Password123!)
+    2. products table created & seeded:
+       - 10 hardware items with prices and stock limits.
+    3. carts & cart_items tables created & seeded:
+       - Active cart for Alice containing Mechanical Keyboard & Ergonomic Mouse.
+    4. orders & order_items tables created & seeded:
+       - Completed order #d408f10b for Bob with status CONFIRMED and historical price snapshot.
+
+[STATUS: FULLY VERIFIED & CONNECTED TO SUPABASE POSTGRESQL]
+
+[STEP 6: DETAILED ERROR LOG & RESOLUTION TRACKER]
+- Error: ModuleNotFoundError: No module named 'passlib'
+  * Solution: Installed passlib[bcrypt] and bcrypt into .venv.
+
+- Error: ImportError: email-validator is not installed, run pip install pydantic[email]
+  * Solution: Added email-validator>=2.1.0 to requirements.txt for Pydantic EmailStr validation.
+
+- Error: ValueError: password cannot be longer than 72 bytes (Passlib 1.7.4 / Bcrypt 5.0 compatibility bug)
+  * Solution: Replaced passlib CryptContext with direct bcrypt routines (bcrypt.hashpw and bcrypt.checkpw) in app/core/security.py.
+
+- Error: InvalidRequestError: When initializing mapper Mapper[User(users)], expression 'Cart' failed to locate a name ('Cart')
+  * Solution: Updated app/db/seed.py to import Base, User, Product, Cart, CartItem, Order, OrderItem from app.db.base.
+
+- Error: MissingGreenlet: greenlet_spawn has not been called when accessing relationship attributes during checkout
+  * Solution: Eagerly loaded relationships using selectinload(Cart.cart_items).selectinload(CartItem.product) with populate_existing=True.
+
+- Error: Browser ERR_ADDRESS_INVALID on IPv6 host notation [::]:3000
+  * Solution: Added --bind 127.0.0.1 flag to python -m http.server command.
+
+- Error: socket.gaierror: [Errno 11003] getaddrinfo failed on direct Supabase hostname db.[ref].supabase.co
+  * Solution: Configured IPv4-supported connection pooler hostname aws-0-ap-south-1.pooler.supabase.com:6543.
+
+- Error: Password URL parsing error due to raw '@' in password MiniCommerceDB@123@123@123
+  * Solution: URL-encoded '@' to '%40' in DATABASE_URL.
+
+- Error: asyncpg.exceptions.DuplicatePreparedStatementError on PgBouncer startup
+  * Solution: Added statement_cache_size=0 and prepared_statement_cache_size=0 to connect_args in app/db/session.py.
+
+- Error: Uvicorn infinite reload loop scanning .venv
+  * Solution: Added --reload-exclude ".venv" flag to uvicorn command line.
+
+[STEP 7: VERSIONING DOCUMENTATION & REPOSITORY SECURITY]
+- Requirement: Document Version 1 architecture specification and configure git repository rules to protect secrets and logs.
+- Implementation & Solutions:
+  * Created v/v1.md containing detailed architecture layout, layer specifications, Supabase pooler setup, API reference, and feature inventory.
+  * Created root README.md providing quick start execution commands and default user test credentials.
+  * Configured .gitignore to ignore .venv virtual environment, bytecode (__pycache__), database binaries (*.db), work log (abcd.txt), implementation plans, and all environment secret files (.env).
+  * Verified that putting .env in .gitignore recursively protects backend/.env and any nested environment secret files across all subdirectories.
+
+================================================================================
+ALL STEPS & ERRORS DOCUMENTED | SYSTEM FULLY OPERATIONAL ON SUPABASE POSTGRESQL
+================================================================================
+
+
