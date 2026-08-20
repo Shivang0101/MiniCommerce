@@ -29,15 +29,18 @@ class ProductService:
         min_price: Decimal | None = None,
         max_price: Decimal | None = None,
         sort_by: str = "name",
-        sort_order: str = "asc"
-    ) -> list[Product]:
-        products, total_count = await ProductRepository.list_products(
+        sort_order: str = "asc",
+        search: str | None = None,
+        category: str | None = None
+    ) -> tuple[list[Product], int]:
+        return await ProductRepository.list_products(
             db,
             page=page,
             page_size=page_size,
             min_price=min_price,
             max_price=max_price,
             sort_by=sort_by,
-            sort_order=sort_order
+            sort_order=sort_order,
+            search=search,
+            category=category
         )
-        return products

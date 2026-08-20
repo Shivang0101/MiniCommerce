@@ -1,7 +1,14 @@
+import sys
 import asyncio
 import uuid
 import random
+from pathlib import Path
 from decimal import Decimal
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import AsyncSessionLocal, engine
 from app.db.base import Base
@@ -14,89 +21,156 @@ CATEGORIES = ["Laptops", "Smartphones", "Monitors", "Keyboards", "Storage", "Aud
 ADJECTIVES = ["Ultra", "Pro", "Gaming", "Wireless", "Compact", "Ergonomic", "High-Speed", "Extreme", "Silent", "RGB"]
 NOUNS = ["Master", "Extreme", "V2", "Edition", "Series X", "Prime", "Elite", "Max", "Plus", "Studio"]
 
-async def generate_load_data(num_users: int = 500, num_products: int = 2000, num_orders: int = 1500):
-    print(f"🚀 Starting dataset generation: {num_users} users, {num_products} products, {num_orders} orders...")
+BATCH_SIZE = 5000  # Commit in chunks of 5000 to maximize throughput
+
+async def generate_load_data(num_users: int = 10000, num_products: int = 50000, num_orders: int = 100000):
+    print(f"[INFO] Starting high-speed dataset generation:")
+    print(f"   - Users: {num_users:,}")
+    print(f"   - Products: {num_products:,}")
+    print(f"   - Orders: {num_orders:,}")
+    print(f"   - Approx Order Items: {num_orders * 3:,}")
+    print("--------------------------------------------------")
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
     async with AsyncSessionLocal() as db:
         # 1. Bulk Create Users
-        print("Creating users...")
+        print(f"[PROGRESS] Generating {num_users:,} users...")
         pwd_hash = hash_password("Password123!")
-        users = []
+        user_ids = []
+        user_batch = []
+        run_id = str(uuid.uuid4())[:8]
+        
         for i in range(num_users):
+            u_id = uuid.uuid4()
+            user_ids.append(u_id)
             user = User(
-                email=f"load_user_{i+1}@benchmark.com",
+                id=u_id,
+                email=f"user_{run_id}_{i+1}@benchmark.com",
                 password_hash=pwd_hash
             )
-            db.add(user)
-            users.append(user)
-        await db.commit()
-        for u in users:
-            await db.refresh(u)
-        user_ids = [u.id for u in users]
+            user_batch.append(user)
+
+            if len(user_batch) >= BATCH_SIZE:
+                db.add_all(user_batch)
+                await db.commit()
+                user_batch = []
+                print(f"   Progress: {i+1:,} / {num_users:,} users committed.")
+
+        if user_batch:
+            db.add_all(user_batch)
+            await db.commit()
+
+        print("[SUCCESS] Users completed.")
 
         # 2. Bulk Create Products
-        print("Creating products...")
-        products = []
+        print(f"[PROGRESS] Generating {num_products:,} products...")
+        product_ids = []
+        product_prices = {}
+        product_batch = []
+
         for i in range(num_products):
+            p_id = uuid.uuid4()
+            product_ids.append(p_id)
+            price = Decimal(str(round(random.uniform(9.99, 1999.99), 2)))
+            product_prices[p_id] = price
+
             cat = random.choice(CATEGORIES)
             adj = random.choice(ADJECTIVES)
             noun = random.choice(NOUNS)
             name = f"{adj} {cat} {noun} #{i+1}"
-            price = Decimal(str(round(random.uniform(9.99, 1999.99), 2)))
             stock = random.randint(10, 500)
+
             product = Product(
+                id=p_id,
                 name=name,
                 description=f"Performance laboratory benchmark item {i+1} in {cat}.",
                 price=price,
                 stock=stock
             )
-            db.add(product)
-            products.append(product)
-        await db.commit()
-        for p in products:
-            await db.refresh(p)
-        product_map = {p.id: p for p in products}
-        product_ids = list(product_map.keys())
+            product_batch.append(product)
+
+            if len(product_batch) >= BATCH_SIZE:
+                db.add_all(product_batch)
+                await db.commit()
+                product_batch = []
+                print(f"   Progress: {i+1:,} / {num_products:,} products committed.")
+
+        if product_batch:
+            db.add_all(product_batch)
+            await db.commit()
+
+        print("[SUCCESS] Products completed.")
 
         # 3. Bulk Create Orders & OrderItems
-        print("Creating orders...")
+        print(f"[PROGRESS] Generating {num_orders:,} orders with order items...")
+        order_batch = []
+        item_batch = []
+        total_items_created = 0
+
         for i in range(num_orders):
-            u_id = random.choice(user_ids)
+            order_id = uuid.uuid4()
+            user_id = random.choice(user_ids)
             selected_p_ids = random.sample(product_ids, k=random.randint(1, 4))
             total_amt = Decimal("0.00")
 
-            order = Order(
-                user_id=u_id,
-                status="CONFIRMED",
-                total_amount=Decimal("0.00"),
-                idempotency_key=f"load_key_{i+1}"
-            )
-            db.add(order)
-            await db.flush()
-
             for p_id in selected_p_ids:
-                p = product_map[p_id]
+                p_price = product_prices[p_id]
                 qty = random.randint(1, 3)
-                item_total = Decimal(str(p.price)) * Decimal(str(qty))
-                total_amt += item_total
+                total_amt += p_price * Decimal(str(qty))
 
                 item = OrderItem(
-                    order_id=order.id,
-                    product_id=p.id,
+                    id=uuid.uuid4(),
+                    order_id=order_id,
+                    product_id=p_id,
                     quantity=qty,
-                    price=p.price
+                    price=p_price
                 )
-                db.add(item)
-            
-            order.total_amount = total_amt
-            if i % 100 == 0:
-                await db.commit()
+                item_batch.append(item)
+                total_items_created += 1
 
-        await db.commit()
-        print("✅ Load data generation complete!")
+            order = Order(
+                id=order_id,
+                user_id=user_id,
+                status="CONFIRMED",
+                total_amount=total_amt,
+                idempotency_key=f"load_key_{i+1}"
+            )
+            order_batch.append(order)
+
+            if len(order_batch) >= BATCH_SIZE:
+                db.add_all(order_batch)
+                db.add_all(item_batch)
+                await db.commit()
+                order_batch = []
+                item_batch = []
+                print(f"   Progress: {i+1:,} / {num_orders:,} orders committed ({total_items_created:,} items).")
+
+        if order_batch:
+            db.add_all(order_batch)
+            db.add_all(item_batch)
+            await db.commit()
+
+        print("[SUCCESS] High-speed load data generation complete!")
+        print(f"   Total Users: {num_users:,}")
+        print(f"   Total Products: {num_products:,}")
+        print(f"   Total Orders: {num_orders:,}")
+        print(f"   Total Order Items: {total_items_created:,}")
+
+def main():
+    users = 10000
+    products = 50000
+    orders = 100000
+
+    if len(sys.argv) > 1:
+        users = int(sys.argv[1])
+    if len(sys.argv) > 2:
+        products = int(sys.argv[2])
+    if len(sys.argv) > 3:
+        orders = int(sys.argv[3])
+
+    asyncio.run(generate_load_data(num_users=users, num_products=products, num_orders=orders))
 
 if __name__ == "__main__":
-    asyncio.run(generate_load_data())
+    main()

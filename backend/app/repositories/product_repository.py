@@ -20,9 +20,24 @@ class ProductRepository:
         min_price: Decimal | None = None,
         max_price: Decimal | None = None,
         sort_by: str = "name",
-        sort_order: str = "asc"
+        sort_order: str = "asc",
+        search: str | None = None,
+        category: str | None = None
     ) -> tuple[list[Product], int]:
         stmt = select(Product)
+
+        # Apply search and category filters
+        if search:
+            search_term = f"%{search.strip()}%"
+            stmt = stmt.where(
+                (Product.name.ilike(search_term)) | (Product.description.ilike(search_term))
+            )
+
+        if category and category.lower() != "all":
+            cat_term = f"%{category.strip()}%"
+            stmt = stmt.where(
+                (Product.name.ilike(cat_term)) | (Product.description.ilike(cat_term))
+            )
 
         # Apply price filters
         if min_price is not None:

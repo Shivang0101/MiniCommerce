@@ -25,7 +25,11 @@ app = FastAPI(
 # Exception handlers
 app.add_exception_handler(HTTPException, api_exception_handler)
 
-# CORS configuration
+# Custom Middlewares
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(RequestIdMiddleware)
+
+# CORS configuration (Added last so it wraps all middlewares and exception handlers)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,10 +37,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Custom Middlewares
-app.add_middleware(LoggingMiddleware)
-app.add_middleware(RequestIdMiddleware)
 
 # Include API v1 Router
 app.include_router(api_v1_router)

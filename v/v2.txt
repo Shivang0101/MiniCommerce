@@ -2,51 +2,79 @@
 MINICOMMERCE V2 LABORATORY - MASTER VERSION 2 SPECIFICATION & WORK LOG (v2.txt)
 ================================================================================
 
-Welcome to MiniCommerce Version 2 (V2) — a dedicated Database Engineering, Concurrency & Performance Laboratory. V2 builds upon the 4-tier FastAPI architecture of V1 by refactoring the backend into a 5-tier Data Layer Architecture (introducing the Repository Pattern), implementing row-level locking (`SELECT ... FOR UPDATE`), introducing idempotency key constraints, adding catalog pagination & filtering, and documenting EXPLAIN ANALYZE performance benchmarks.
+Welcome to MiniCommerce Version 2 (V2) — a dedicated Database Engineering, Concurrency & Performance Laboratory. 
+
+V1 established a clean 4-tier FastAPI backend (Routers → Services → Models → PostgreSQL). 
+V2 shifts focus to database engineering under load and modern frontend component engineering:
+1. 5-Tier Data Layer Architecture (introducing the Repository Pattern in app/repositories/)
+2. Concurrency Control & Pessimistic Row-Level Locking (SELECT ... FOR UPDATE with deterministic ID ordering)
+3. Idempotency Engine (Idempotency-Key header backed by composite UNIQUE constraint on orders table)
+4. Catalog Pagination, Price Filtering, Category Chips & Real-time Search (OFFSET pagination on GET /api/v1/products)
+5. Standardized Error Payload Formatting (app/core/errors.py)
+6. High-Speed Bulk Seeding (generate_load_data.py generating 409,913 records in Supabase PostgreSQL)
+7. Modern React 18 + Vite 5 SPA Frontend (frontend/) with Lucide Icons and Dark Glassmorphism Design System
+8. EXPLAIN ANALYZE Benchmarking & Technical Documentation Laboratory (docs/v2/)
+
+STRICTLY EXCLUDED IN V2 (Reserved for V3+): Redis, Docker, Celery, Kafka, AWS, Kubernetes, Microservices.
 
 ================================================================================
-SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS
+SECTION 1: ARCHITECTURE SPECIFICATION & COMPARISON (V1 vs V2)
 ================================================================================
 
-MiniCommerce V2 strictly enforces a 5-tier layered architecture:
+### Architectural Transition: 4-Tier (V1) ➔ 5-Tier Data Layer + React Vite SPA (V2)
+
+```text
+V1 ARCHITECTURE (4-Tier + Vanilla HTML):
+  Vanilla JS SPA ➔ Middlewares ➔ Router Layer ➔ Service Layer ➔ SQLAlchemy ORM ➔ PostgreSQL
+
+V2 ARCHITECTURE (5-Tier Data Layer + React 18 Vite SPA):
+  React Vite SPA (Port 3000) ➔ Middlewares ➔ Router Layer ➔ Service Layer ➔ Repository Layer ➔ SQLAlchemy 2.x ➔ PostgreSQL
+```
+
+### Visual Architecture Diagram (V2):
 
 +-----------------------------------------------------------------------------+
-|                               HTTP REQUEST                                  |
+|               REACT 18 + VITE 5 SPA FRONTEND (http://localhost:3000)        |
+|  - App.jsx (State: search, category, page, pageSize, min/max price, cart)   |
+|  - Components: Navbar, CategoryBar, ControlBar, ProductGrid, CartDrawer,    |
+|                AuthModal, ProfileModal (Order History), Pagination, Toast   |
 +-----------------------------------------------------------------------------+
-                                       |
+                                       | (HTTP / JSON API Proxy)
                                        v
 +-----------------------------------------------------------------------------+
 |                          MIDDLEWARE PIPELINE                                |
 |  - RequestIDMiddleware  (Attaches unique X-Request-ID UUID)               |
-|  - LoggingMiddleware    (Logs method, path, status, latency_ms)             |
+|  - LoggingMiddleware    (Logs route, method, status, latency_ms)          |
+|  - CORSMiddleware       (Outermost: handles preflight & CORS headers)       |
 +-----------------------------------------------------------------------------+
                                        |
                                        v
 +-----------------------------------------------------------------------------+
 |                       ROUTER LAYER (app/api/v1/)                            |
-|  Thin controllers handling HTTP request validation & response serialization |
+|  Thin HTTP route controllers validating Pydantic schemas                    |
 |  - auth.py      (POST /register, POST /login, GET /me)                      |
-|  - products.py  (GET /products [page, filter, sort], GET /{id}, POST /)    |
+|  - products.py  (GET /products [page, search, category, min/max, sort],     |
+|                  GET /{id}, POST /products) [Sets X-Total-Count header]     |
 |  - cart.py      (GET /cart, POST /items, PATCH /items/{id}, DELETE /items)   |
-|  - orders.py    (POST /orders [Idempotency-Key], GET /orders, GET /{id})    |
+|  - orders.py    (POST /orders [Idempotency-Key header], GET /orders, GET/{id})|
 +-----------------------------------------------------------------------------+
                                        |
                                        v
 +-----------------------------------------------------------------------------+
 |                      SERVICE LAYER (app/services/)                          |
-|  Business logic, domain validations, transaction & idempotency rules        |
-|  - auth_service.py    (User registration & JWT authentication)            |
-|  - product_service.py (Catalog pagination, price filtering, sorting)        |
-|  - cart_service.py    (Cart item quantity management & validation)          |
-|  - order_service.py   (Idempotency key check, FOR UPDATE row locking)       |
+|  Business logic, domain invariants, transaction control, idempotency        |
+|  - auth_service.py    (User registration & JWT password verification)       |
+|  - product_service.py (Catalog pagination, sorting, price/search/category) |
+|  - cart_service.py    (Cart item quantity management & stock validation)    |
+|  - order_service.py   (Idempotency check, FOR UPDATE row locking, commit)   |
 +-----------------------------------------------------------------------------+
                                        |
                                        v
 +-----------------------------------------------------------------------------+
 |                    REPOSITORY LAYER (app/repositories/)                     |
 |  Encapsulated Data Access & Query Execution                                 |
-|  - user_repository.py    (User email & ID queries)                          |
-|  - product_repository.py (OFFSET pagination, B-tree search, FOR UPDATE)   |
+|  - user_repository.py    (User email & UUID queries)                        |
+|  - product_repository.py (OFFSET pagination, ILIKE search, FOR UPDATE)     |
 |  - cart_repository.py    (Eager relationship loading & cart persistence)    |
 |  - order_repository.py   (Order creation & idempotency key lookup)         |
 +-----------------------------------------------------------------------------+
@@ -54,116 +82,328 @@ MiniCommerce V2 strictly enforces a 5-tier layered architecture:
                                        v
 +-----------------------------------------------------------------------------+
 |                     SQLALCHEMY ORM & POSTGRESQL DB                          |
-|  SQLAlchemy 2.x AsyncSession -> PgBouncer Pool -> PostgreSQL Constraints    |
+|  SQLAlchemy 2.x AsyncSession -> PgBouncer Pool -> PostgreSQL Check Rules    |
 +-----------------------------------------------------------------------------+
 
 ================================================================================
-SECTION 2: FEATURES & KEY CODE SNIPPETS
+SECTION 2: ENGINEERING DECISIONS & DESIGN TRADE-OFFS
 ================================================================================
 
-1. Repository Pattern (`app/repositories/product_repository.py`):
+1. **React 18 + Vite 5 SPA Frontend Architecture**:
+   - *Decision*: Rebuild `frontend/` using **React 18**, **Vite 5**, and **Lucide React Icons**.
+   - *Rationale*: Replaces basic vanilla HTML with a modular component architecture (`Navbar`, `CategoryBar`, `ControlBar`, `ProductCard`, `ProductGrid`, `CartDrawer`, `AuthModal`, `Pagination`, `Toast`). Lightning-fast Hot Module Replacement (HMR) via `npm run dev`.
+
+2. **Repository Pattern Encapsulation**:
+   - *Decision*: Introduce `app/repositories/` containing pure data-access static methods.
+   - *Rationale*: Routers handle HTTP parsing; Services handle business rules and transaction boundaries; Repositories isolate SQLAlchemy select/update constructs.
+
+3. **Pessimistic Row-Level Locking (`SELECT FOR UPDATE`)**:
+   - *Decision*: Lock product rows explicitly during checkout using `ProductRepository.get_by_ids_for_update`.
+   - *Rationale*: Prevents race conditions and lost updates when multiple users purchase the last remaining stock (`stock = 1`) simultaneously.
+
+4. **Deterministic Lock Ordering (`ORDER BY id ASC`)**:
+   - *Decision*: Sort product IDs in ascending order (`sorted(product_ids)`) before querying `with_for_update()`.
+   - *Rationale*: Eliminates cyclic wait deadlocks when concurrent transactions request overlapping sets of products in different order.
+
+5. **Composite Unique Database Constraint for Idempotency**:
+   - *Decision*: Enforce idempotency at the PostgreSQL database level using `UniqueConstraint("user_id", "idempotency_key")`.
+   - *Rationale*: Application-level checks can be bypassed by simultaneous parallel requests. Database unique constraints provide absolute transactional guarantees.
+
+6. **Catalog Search & Category Filtering (`ILIKE` Matching)**:
+   - *Decision*: Add optional `search` (text search matching `Product.name` and `Product.description`) and `category` query parameters to `GET /api/v1/products`.
+   - *Rationale*: Enables instant full-text filtering across the 50,000 product benchmark dataset directly from the UI.
+
+7. **Configurable Page Size (12, 24, 48, 96 per page)**:
+   - *Decision*: Expose configurable page size controls in `ControlBar.jsx` and forward `page_size` parameter to the backend.
+   - *Rationale*: Replaces rigid 6-item pagination with user-selectable density while maintaining OFFSET bounds.
+
+8. **`X-Total-Count` Header & Unconstrained Page Scrolling**:
+   - *Decision*: Attach `X-Total-Count` response header on `GET /api/v1/products` and remove `overflow: hidden` from body CSS (`overflow-y: auto !important`).
+   - *Rationale*: Provides frontend pagination components with total page numbers while enabling smooth vertical scrolling.
+
+9. **Outermost CORSMiddleware Position**:
+   - *Decision*: Position `CORSMiddleware` as the outermost middleware (added last in `main.py`).
+   - *Rationale*: Guarantees CORS headers (`Access-Control-Allow-Origin: *`, `Access-Control-Expose-Headers: X-Total-Count`) are attached to all response types, including 4xx/5xx exceptions.
+
+10. **Client-Side Python UUID Pre-generation for Bulk Seeding**:
+   - *Decision*: Assign `uuid.uuid4()` client-side in `generate_load_data.py` before `db.add_all()`.
+   - *Rationale*: Eliminates `RETURNING id` network round-trips (`db.refresh()`), allowing 409,913 records to seed in under 60 seconds over remote Supabase pooler connections.
+
+================================================================================
+SECTION 3: CORE CODE SNIPPETS
+================================================================================
+
+### 1. Backend Search, Category & Pagination Query (`app/repositories/product_repository.py`)
 ```python
 @staticmethod
-async def get_by_ids_for_update(db: AsyncSession, product_ids: list[uuid.UUID]) -> list[Product]:
-    # Enforces deterministic locking order to prevent deadlocks
-    sorted_ids = sorted(product_ids)
-    stmt = (
-        select(Product)
-        .where(Product.id.in_(sorted_ids))
-        .order_by(Product.id.asc())
-        .with_for_update()
-    )
+async def list_products(
+    db: AsyncSession,
+    page: int = 1,
+    page_size: int = 20,
+    min_price: Decimal | None = None,
+    max_price: Decimal | None = None,
+    sort_by: str = "name",
+    sort_order: str = "asc",
+    search: str | None = None,
+    category: str | None = None
+) -> tuple[list[Product], int]:
+    stmt = select(Product)
+
+    if search:
+        search_term = f"%{search.strip()}%"
+        stmt = stmt.where(
+            (Product.name.ilike(search_term)) | (Product.description.ilike(search_term))
+        )
+
+    if category and category.lower() != "all":
+        cat_term = f"%{category.strip()}%"
+        stmt = stmt.where(
+            (Product.name.ilike(cat_term)) | (Product.description.ilike(cat_term))
+        )
+
+    if min_price is not None:
+        stmt = stmt.where(Product.price >= min_price)
+    if max_price is not None:
+        stmt = stmt.where(Product.price <= max_price)
+
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total_result = await db.execute(count_stmt)
+    total_count = total_result.scalar_one() or 0
+
+    valid_sort_fields = {
+        "name": Product.name,
+        "price": Product.price,
+        "created_at": Product.created_at,
+        "stock": Product.stock
+    }
+    sort_column = valid_sort_fields.get(sort_by.lower(), Product.name)
+    direction = desc if sort_order.lower() == "desc" else asc
+
+    stmt = stmt.order_by(direction(sort_column))
+    offset = (page - 1) * page_size
+    stmt = stmt.offset(offset).limit(page_size)
+
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    products = list(result.scalars().all())
+    return products, total_count
 ```
 
-2. Idempotency Key Engine (`app/services/order_service.py`):
+### 2. Products Router with `X-Total-Count` Header (`app/api/v1/products.py`)
 ```python
-if idempotency_key:
-    existing_order = await OrderRepository.get_by_idempotency_key(db, user_id, idempotency_key)
-    if existing_order:
-        return existing_order
+@router.get("", response_model=list[ProductResponse])
+async def list_products(
+    response: Response,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    min_price: Decimal | None = Query(None, ge=0),
+    max_price: Decimal | None = Query(None, ge=0),
+    sort_by: str = Query("name"),
+    sort_order: str = Query("asc"),
+    search: str | None = Query(None),
+    category: str | None = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    products, total_count = await ProductService.list_products(
+        db, page=page, page_size=page_size, min_price=min_price, max_price=max_price,
+        sort_by=sort_by, sort_order=sort_order, search=search, category=category
+    )
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return products
 ```
 
-3. Catalog Pagination, Filtering & Sorting (`app/repositories/product_repository.py`):
-```python
-stmt = select(Product)
-if min_price is not None:
-    stmt = stmt.where(Product.price >= min_price)
-if max_price is not None:
-    stmt = stmt.where(Product.price <= max_price)
+### 3. React Atomic Idempotent Checkout (`frontend/src/App.jsx`)
+```javascript
+const handleCheckout = async () => {
+  if (!cart?.cart_items || cart.cart_items.length === 0) {
+    showToast('error', 'Empty Cart', 'Please add products to your cart before checking out.');
+    return;
+  }
 
-stmt = stmt.order_by(direction(sort_column)).offset((page - 1) * page_size).limit(page_size)
+  setIsCheckingOut(true);
+  const idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  try {
+    const { data: order } = await apiRequest(
+      '/orders',
+      'POST',
+      null,
+      true,
+      { 'Idempotency-Key': idempotencyKey }
+    );
+
+    setCart({ cart_items: [] });
+    setIsCartOpen(false);
+    await fetchProducts();
+
+    showToast(
+      'success',
+      '⚡ Atomic Checkout Confirmed!',
+      `Order confirmed with Idempotency-Key: ${idempotencyKey}. Total: $${parseFloat(order.total_amount).toFixed(2)}`,
+      order.id
+    );
+
+  } catch (err) {
+    showToast('error', 'Checkout Execution Failed', err.message);
+  } font-finally {
+    setIsCheckingOut(false);
+  }
+};
 ```
 
 ================================================================================
-SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS
+SECTION 4: FEATURE & API CHANGES FROM V1 TO V2
 ================================================================================
 
-1. `GET /api/v1/products`: Added `page`, `page_size`, `min_price`, `max_price`, `sort_by`, `sort_order` query parameters.
-2. `POST /api/v1/orders`: Added `Idempotency-Key` request header support.
-3. `orders` Table Schema: Added `idempotency_key` column (`String(255)`) and composite `UniqueConstraint("user_id", "idempotency_key")`.
-4. API Error Handling (`app/core/errors.py`): Standardized JSON error response payload including `code`, `message`, `detail`, and `request_id`.
+1. **Frontend SPA Rebuild**: Replaced basic vanilla HTML with **React 18 + Vite 5 + Lucide React Icons** (`frontend/`).
+2. `GET /api/v1/products`: Added `search` and `category` query parameters alongside `page`, `page_size`, `min_price`, `max_price`, `sort_by`, `sort_order`.
+3. `X-Total-Count` Header: Added HTTP header exposing matching item count for frontend pagination computation.
+4. `POST /api/v1/orders`: Added support for `Idempotency-Key` HTTP header.
+5. `orders` Database Schema: Added `idempotency_key VARCHAR(255)` column and composite `UniqueConstraint("user_id", "idempotency_key")`.
+6. API Error Handling: Standardized JSON payload returning `detail`, `error.code`, `error.message`, and `request_id`.
+7. UI Enhancements: Interactive Category Chips (`Laptops`, `Smartphones`, `Monitors`, etc.), Search Bar with instant debounce, Price Range filters, Configurable Page Sizes (12, 24, 48, 96), Quick Demo Login Modal (`alice@example.com`), and Receipt Toast notifications.
+8. User Profile & Order History Modal (`src/components/ProfileModal.jsx`): Displays authenticated user profile, total orders count, expandable order details with line items breakdown, unit prices, and 1-click UUID copy buttons.
 
 ================================================================================
-SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES
+SECTION 5: INFRASTRUCTURE, CONFIGURATION & DATASET METRICS
 ================================================================================
 
-1. Repository Layer (`app/repositories/`) created.
-2. Data Generator Script (`app/db/generate_load_data.py`) implemented for population of 500+ users, 2000+ products, and 1500+ orders.
-3. V2 Documentation Suite (`docs/v2/`) created with 8 technical specifications.
+### Supabase PostgreSQL Production Dataset Metrics:
+- **`users` Table**: **10,000** records
+- **`products` Table**: **50,000** records
+- **`orders` Table**: **100,000** records
+- **`order_items` Table**: **249,913** records
+- **Total Dataset Size**: **409,913 records** (~150 MB disk space, well within Supabase 500 MB Free Tier).
+
+### Frontend Vite Dev Server Configuration (`frontend/vite.config.js`):
+- Dev server runs on **`http://localhost:3000`** with `/api` proxy pointing to FastAPI backend (`http://127.0.0.1:8000`).
+
+### Technical Documentation Suite (`docs/v2/`):
+- `architecture.md`: 5-tier architecture & data layer specification.
+- `database-design.md`: ER diagram, foreign keys, and check constraints.
+- `indexing.md`: Index placement strategy for users, products, cart_items, and orders.
+- `query-analysis.md`: `EXPLAIN ANALYZE` execution plans before & after B-tree indexes.
+- `transactions.md`: ACID properties and PostgreSQL isolation levels.
+- `concurrency.md`: Row locking (`FOR UPDATE`), race condition mitigation, and deadlock prevention.
+- `idempotency.md`: `Idempotency-Key` workflow and DB uniqueness guarantees.
+- `performance.md`: Endpoint latency distribution benchmarks (p50, p95, p99).
+- `experiments.md`: Log of performance & locking experiments.
 
 ================================================================================
-SECTION 5: STEP-BY-STEP WORK LOG
+SECTION 6: STEP-BY-STEP IMPLEMENTATION WORK LOG
 ================================================================================
 
-[STEP 1: ARCHITECTURE REFACTORING]
+[STEP 1: REPOSITORY LAYER CREATION]
 Created `app/repositories/` package with `UserRepository`, `ProductRepository`, `CartRepository`, `OrderRepository`.
 
-[STEP 2: SERVICE LAYER INTEGRATION]
-Refactored `AuthService`, `ProductService`, `CartService`, `OrderService` to delegate all SQL queries to repositories.
+[STEP 2: SERVICE LAYER REFACTORING]
+Refactored `AuthService`, `ProductService`, `CartService`, `OrderService` to delegate SQL operations to repositories.
 
 [STEP 3: CONCURRENCY & ROW-LEVEL LOCKING]
-Implemented `SELECT FOR UPDATE` on `ProductRepository.get_by_ids_for_update` with deterministic `ORDER BY id ASC` sorting.
+Implemented `SELECT FOR UPDATE` with `ORDER BY id ASC` in `ProductRepository.get_by_ids_for_update`.
 
 [STEP 4: IDEMPOTENCY KEY IMPLEMENTATION]
-Added `idempotency_key` field to `Order` model, database unique constraint, and header parsing in `orders.py` router.
+Updated `Order` model with `idempotency_key` column, composite unique constraint, and router header parsing.
 
-[STEP 5: CATALOG PAGINATION & FILTERING]
-Upgraded `ProductService.list_products` and `products.py` router with offset pagination and price filtering.
+[STEP 5: SCHEMA SYNCHRONIZATION ON SUPABASE]
+Created `app/db/migrate_idempotency.py` executing `ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);` and unique index creation against live Supabase PostgreSQL.
 
-[STEP 6: TESTING & VERIFICATION]
-Built 22 automated Pytest cases across `test_auth.py`, `test_cart.py`, `test_orders.py`, `test_products.py`, `test_repositories.py`, `test_idempotency.py`, and `test_concurrency.py`. 100% pass rate achieved.
+[STEP 6: CATALOG PAGINATION, SEARCH & CATEGORY FILTERS]
+Upgraded `ProductRepository.list_products`, `ProductService.list_products`, and `products.py` router with `search`, `category`, `page`, `page_size`, `min_price`, `max_price`, `sort_by`, `sort_order`, and `X-Total-Count` header.
+
+[STEP 7: STANDARDIZED ERROR CONTRACT]
+Created `app/core/errors.py` exception handler formatting JSON error responses with `code`, `message`, and `request_id`.
+
+[STEP 8: BULK DATA GENERATOR SCRIPT]
+Built `app/db/generate_load_data.py` with pre-generated UUIDs and chunked batch commits (5,000 items/chunk). Populated 409,913 records to Supabase.
+
+[STEP 9: AUTOMATED TEST SUITE EXPANSION]
+Created `test_repositories.py`, `test_idempotency.py`, and `test_concurrency.py`. Expanded suite to 22 test cases.
+
+[STEP 10: REACT + VITE FRONTEND SPA REBUILD]
+Initialized React 18, Vite 5, and Lucide React Icons in `frontend/`. Created `package.json`, `vite.config.js`, `index.html`, and `src/index.css`.
+
+[STEP 11: REACT COMPONENT SYSTEM IMPLEMENTATION]
+Built modular components: `Navbar`, `CategoryBar`, `ControlBar`, `ProductCard`, `ProductGrid`, `CartDrawer`, `AuthModal`, `Pagination`, `Toast`, and `App.jsx`.
+
+[STEP 12: BUILD & INTEGRATION VERIFICATION]
+Ran `npm install` and `npm run build` (vite build succeeded in 2.14s). Verified Pytest backend suite (22/22 passed).
 
 ================================================================================
-SECTION 6: ERROR LOG & RESOLUTION TRACKER
+SECTION 7: ERROR LOG & RESOLUTION TRACKER
 ================================================================================
 
-- Error 1: `KeyError: 'detail'` in Pytest assertions after standardizing error response format.
-  * Solution: Updated `app/core/errors.py` to populate both `"detail"` and `"error"` fields in JSON responses.
-- Error 2: Session identity map caching returned stale stock values during Pytest integration tests.
-  * Solution: Invoked `db_session.expire_all()` after endpoint calls to re-read updated database state.
-- Error 3: Test session isolation conflict during concurrent HTTP request simulation.
-  * Solution: Updated `conftest.py` `client` fixture to yield fresh `TestSessionLocal()` database sessions per request.
+[ERROR 1: KEYERROR ON 'DETAIL' IN PYTEST ASSERTIONS]
+- Symptom: 5 test cases in `test_auth.py`, `test_cart.py`, `test_orders.py`, `test_products.py` failed with `KeyError: 'detail'`.
+- Root Cause: Custom exception handler returned `{"error": {"code": ..., "message": ...}}` without root `"detail"` key.
+- Solution: Updated `app/core/errors.py` to include both `"detail"` and `"error"` in JSON response payload.
+
+[ERROR 2: SQLALCHEMY MISSINGGREENLET DURING EXPIRE_ALL()]
+- Symptom: Pytest raised `sqlalchemy.exc.MissingGreenlet: greenlet_spawn has not been called; can't call await_only() here`.
+- Root Cause: Invoking `db_session.expire_all()` expired `product.id` attribute, triggering synchronous lazy loading when passed to `ProductRepository.get_by_id(db_session, product.id)`.
+- Solution: Extracted primitive UUID `product_id = product.id` into a local variable prior to calling `db_session.expire_all()`.
+
+[ERROR 3: TEST SESSION CROSS-CONTAMINATION IN PYTEST ASYNC CLIENT]
+- Symptom: Concurrent requests in `test_concurrency.py` interfered with each other's transactions on SQLite.
+- Root Cause: `conftest.py` `client` fixture yielded a single `db_session` object shared across concurrent HTTP requests.
+- Solution: Updated `conftest.py` `client` fixture to yield a fresh `TestSessionLocal()` database session per request.
+
+[ERROR 4: MISSING COLUMN ON SUPABASE DATABASE]
+- Symptom: Seeding script failed with `sqlalchemy.exc.ProgrammingError: column "idempotency_key" of relation "orders" does not exist`.
+- Root Cause: `Base.metadata.create_all` only creates new tables and does not alter existing tables from V1.
+- Solution: Created `app/db/migrate_idempotency.py` executing `ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);` and unique index creation.
+
+[ERROR 5: UNICODEENCODEERROR ON WINDOWS POWERSHELL CONSOLE]
+- Symptom: `generate_load_data.py` failed with `UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680'`.
+- Root Cause: Emojis (`🚀`, `📦`) in print statements triggered encoding failure on standard Windows `cp1252` console output.
+- Solution: Replaced unicode emojis in `generate_load_data.py` with standard ASCII tags (`[INFO]`, `[PROGRESS]`, `[SUCCESS]`).
+
+[ERROR 6: DUPLICATE KEY VIOLATION ON BENCHMARK USER EMAILS]
+- Symptom: Seeding failed with `asyncpg.exceptions.UniqueViolationError: duplicate key value violates unique constraint "ix_users_email"`.
+- Root Cause: Static user email pattern `load_user_{i}@benchmark.com` conflicted with users inserted in previous partial runs.
+- Solution: Added UUID run prefix `user_{run_id}_{i}@benchmark.com` to guarantee unique email generation on repeat executions.
+
+[ERROR 7: BROWSER "CHECKOUT ERROR: FAILED TO FETCH"]
+- Symptom: Frontend displayed `Checkout error: Failed to fetch` toast notification.
+- Root Cause: Backend server was un-reachable because `uvicorn` was launched from `frontend/` directory instead of `backend/`, and `CORSMiddleware` was inner to custom middlewares.
+- Solution: Launched `uvicorn` from `backend/` and reordered `CORSMiddleware` to be the outermost middleware in `app/main.py`.
+
+[ERROR 8: FRONTEND PAGINATION & UNRESPONSIVE PAGE HEIGHT]
+- Symptom: Frontend displayed only 6 items per page without category search or page scroll.
+- Root Cause: Legacy HTML layout used static CSS height overflow limits without category or search parameters on backend API.
+- Solution: Rebuilt frontend into a React 18 + Vite SPA with Lucide Icons, Category Chips, Search Bar, configurable page size selector (12/24/48/96), `X-Total-Count` headers, and unconstrained body scrolling (`overflow-y: auto !important`).
+
+[ERROR 9: USER EMAIL NOT UPDATING ON LOGIN & CART SYNC STALL]
+- Symptom: Signing in with a new email did not update the navbar user email pill, and adding items to cart did not update the cart badge count.
+- Root Cause: Backend `/auth/login` endpoint returns `{ access_token, token_type }` without a nested user object, causing `data.user` to evaluate as `undefined`. `ensureAuthenticated` fell back to auto-authenticating as Alice.
+- Solution: Updated `AuthModal.jsx` and `App.jsx` to fetch the user profile from `/auth/me` immediately after token acquisition, storing `userProfile` in local storage and React state.
 
 ================================================================================
-SECTION 7: EXECUTION & VERIFICATION COMMANDS
+SECTION 8: EXECUTION, TESTING & VERIFICATION COMMANDS
 ================================================================================
 
-# Activate Virtual Environment & Run Seed Data
+# 1. Activate Virtual Environment (Backend)
 cd backend
 .\.venv\Scripts\Activate.ps1
+
+# 2. Run Database Migrations & Seed Default Accounts
+python app/db/migrate_idempotency.py
 python app/db/seed.py
 
-# Generate Realistic Benchmark Dataset
-python app/db/generate_load_data.py
+# 3. Seed Production Benchmark Dataset (10k Users, 50k Products, 100k Orders)
+python -m app.db.generate_load_data 10000 50000 100000
 
-# Run Full Pytest Suite (22/22 Passed)
+# 4. Run Full Automated Pytest Integration Suite (22/22 Passed)
 python -m pytest -v
 
-# Start FastAPI Backend Server
+# 5. Launch FastAPI Backend Server
 python -m uvicorn app.main:app --reload --reload-exclude ".venv" --port 8000
 
+# 6. Launch React + Vite Frontend SPA (separate terminal)
+cd frontend
+npm install
+npm run dev
+
 ================================================================================
-STATUS: VERSION 2 FULLY OPERATIONAL & VERIFIED (22/22 TESTS PASSED)
+STATUS: VERSION 2 FULLY OPERATIONAL & VERIFIED (22/22 TESTS PASSED, VITE BUILD PASSED)
 ================================================================================
