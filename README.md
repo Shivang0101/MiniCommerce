@@ -1,34 +1,41 @@
-# MiniCommerce V1 — Backend Engineering Laboratory
+# MiniCommerce V2 — Database Engineering, Performance & Concurrency Laboratory
 
-**MiniCommerce V1** is a clean, modular backend engineering laboratory built with **FastAPI**, **PostgreSQL** (via Supabase), **SQLAlchemy 2.x ORM**, **Alembic**, **JWT Authentication**, and **Atomic Transactions**, complemented by a modern Vanilla JS Single Page Application (SPA).
+**MiniCommerce V2** is an advanced backend engineering laboratory built with **FastAPI**, **PostgreSQL** (via Supabase), **SQLAlchemy 2.x ORM**, **Alembic**, **JWT Authentication**, and **Atomic Transactions**, complemented by a modern Vanilla JS Single Page Application (SPA).
+
+Version 2 shifts focus to **Database Engineering, Concurrency Control, Row-Level Locking (`SELECT FOR UPDATE`), Idempotency, Repository Architecture, and Performance Benchmarking**.
 
 ---
 
-## 🏗️ Architectural Overview
+## 🏗️ Architectural Overview (5-Tier Data Layer)
 
-MiniCommerce strictly enforces a 4-tier separation of concerns:
+MiniCommerce V2 strictly enforces a 5-tier separation of concerns:
 
 ```text
 HTTP Request
      │
      ▼
+Middleware Pipeline (RequestId, Logging, Standardized Error Handler)
+     │
+     ▼
 Router Layer (Thin route handlers: app/api/v1/)
      │
      ▼
-Service Layer (Business rules & Atomic transactions: app/services/)
+Service Layer (Business rules, Domain invariants, Transaction boundaries: app/services/)
      │
      ▼
-SQLAlchemy DB Layer (ORM Models & Session: app/models/ & app/db/)
+Repository Layer (Encapsulated Data Access: app/repositories/)
      │
      ▼
-PostgreSQL / Supabase (Database persistence)
+SQLAlchemy 2.x ORM & PostgreSQL / Supabase (Row locks, Check constraints & Persistence)
 ```
 
-### Architectural Principles
-1. **Thin Routers**: Route handlers only handle request parsing and response formatting.
-2. **Business Logic in Services**: All business rules, validation, and transactions reside in services.
-3. **Pydantic Schemas vs ORM Models**: Pydantic schemas define API contracts (`schemas/`); SQLAlchemy 2.x declarative models represent database persistence (`models/`).
-4. **Atomic Checkout**: The checkout flow executes inside an explicit database transaction with stock validation, historical price snapshotting, stock reduction, and cart cleanup.
+### Architectural Principles & V2 Additions
+1. **Thin Routers**: Route handlers only perform HTTP validation, dependency injection (`get_db`, `get_current_user`), and response mapping.
+2. **Business Logic in Services**: All domain rules, stock checks, transaction control, and idempotency reside in services.
+3. **Repository Layer**: Database access patterns (`UserRepository`, `ProductRepository`, `CartRepository`, `OrderRepository`) encapsulate SQL queries, OFFSET pagination, price filtering, and row-level locking.
+4. **Row-Level Locking (`SELECT FOR UPDATE`)**: Atomic checkout locks product rows in deterministic ID order (`ORDER BY id ASC`) to eliminate race conditions, lost updates, and deadlocks.
+5. **Idempotency Engine**: Supports `Idempotency-Key` request headers backed by a composite unique database constraint `(user_id, idempotency_key)` on the `orders` table.
+6. **Pydantic Schemas vs ORM Models**: Pydantic schemas define API contracts (`schemas/`); SQLAlchemy 2.x declarative models represent database persistence (`models/`).
 
 ---
 
@@ -36,14 +43,26 @@ PostgreSQL / Supabase (Database persistence)
 
 ```text
 MiniCommerce/
-├── README.md                 # Project Overview & Guide
-├── .gitignore                # Git ignore rules (.venv, secrets, caches)
-├── abcd.txt                  # Step-by-step work log & error tracker
+├── README.md                 # Master Project Overview & Guide
+├── next_implementation plan  # Version 2 Implementation Specification
+├── .gitignore                # Git ignore rules
 │
-├── v/                        # Version Documentation Folder
-│   ├── v1.txt                # Master Version 1 Architecture, Work Log & Error Tracker
-│   └── script.txt            # Roadmap & Specification Guide for Future Version Files (v2, v3)
-
+├── docs/                     # Technical Documentation Laboratory
+│   └── v2/                   # Version 2 Engineering Modules
+│       ├── architecture.md   # 5-Tier Data Layer Specification
+│       ├── database-design.md# Schema, ER Diagram & Database Invariants
+│       ├── indexing.md       # B-tree Index Placement & Strategy
+│       ├── query-analysis.md # EXPLAIN ANALYZE Execution Plans & Benchmarks
+│       ├── transactions.md   # ACID Guarantees & Transaction Isolation
+│       ├── concurrency.md    # Row Locking (SELECT FOR UPDATE) & Deadlock Prevention
+│       ├── idempotency.md    # Idempotency Engine Architecture
+│       ├── performance.md   # Latency Distribution Benchmarks (p50, p95, p99)
+│       └── experiments.md   # Benchmarking Experiment Logs
+│
+├── v/                        # Master Version Documentation
+│   ├── v1.txt                # Version 1 Master Specification & Work Log
+│   ├── v2.txt                # Version 2 Master Specification & Work Log
+│   └── script.txt            # Master Roadmap & Specification Guide
 │
 ├── backend/                  # FastAPI Application Root
 │   ├── app/
@@ -55,10 +74,11 @@ MiniCommerce/
 │   │   │   │   ├── orders.py
 │   │   │   │   └── router.py
 │   │   │   └── deps.py
-│   │   ├── core/             # Settings & Security (JWT, Bcrypt)
+│   │   ├── core/             # Settings, Security & Standardized Errors
 │   │   │   ├── config.py
-│   │   │   └── security.py
-│   │   ├── middleware/       # Request ID & Access Logging
+│   │   │   ├── security.py
+│   │   │   └── errors.py
+│   │   ├── middleware/       # Request ID & Latency Logging
 │   │   │   ├── request_id.py
 │   │   │   └── logging.py
 │   │   ├── models/           # SQLAlchemy 2.x ORM Models
@@ -72,26 +92,39 @@ MiniCommerce/
 │   │   │   ├── product.py
 │   │   │   ├── cart.py
 │   │   │   └── order.py
+│   │   ├── repositories/     # Encapsulated Data Access Layer
+│   │   │   ├── user_repository.py
+│   │   │   ├── product_repository.py
+│   │   │   ├── cart_repository.py
+│   │   │   └── order_repository.py
 │   │   ├── services/         # Business Logic & Transactions
 │   │   │   ├── auth_service.py
 │   │   │   ├── product_service.py
 │   │   │   ├── cart_service.py
 │   │   │   └── order_service.py
-│   │   ├── db/               # DB Session & Seed Script
+│   │   ├── db/               # DB Session, Seed Script & Data Generator
 │   │   │   ├── base.py
 │   │   │   ├── session.py
-│   │   │   └── seed.py
+│   │   │   ├── seed.py
+│   │   │   └── generate_load_data.py
 │   │   └── main.py           # FastAPI Application Entrypoint
 │   ├── alembic/              # Database Migration Scripts
-│   ├── tests/                # Pytest Unit & Integration Suite
+│   ├── tests/                # Pytest Integration & Concurrency Suite
+│   │   ├── test_auth.py
+│   │   ├── test_cart.py
+│   │   ├── test_orders.py
+│   │   ├── test_products.py
+│   │   ├── test_repositories.py
+│   │   ├── test_idempotency.py
+│   │   └── test_concurrency.py
 │   ├── alembic.ini
 │   ├── requirements.txt
 │   └── .env
 │
 └── frontend/                 # Vanilla JS SPA Client
-    ├── index.html            # HTML5 Layout & Modals
+    ├── index.html            # HTML5 Layout, Modals & Pagination Controls
     ├── styles.css            # Modern Dark Glassmorphism CSS
-    └── app.js                # Vanilla JS SPA Client Logic
+    └── app.js                # SPA Client Logic (Pagination, Filtering, Idempotency Header)
 ```
 
 ---
@@ -121,16 +154,20 @@ JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 ```
 
-Run the seed script to create all database tables and insert simulated data:
+Run seed or load data generator script to populate database tables:
 ```powershell
+# Default Seed Data
 python app/db/seed.py
+
+# Benchmark Load Dataset Generator (500 users, 2000 products, 1500 orders)
+python app/db/generate_load_data.py
 ```
 
 ### 3. Run Pytest Suite
 ```powershell
 python -m pytest -v
 ```
-*Expected: 17/17 tests passing.*
+*Expected: 22/22 tests passing cleanly.*
 
 ### 4. Start Backend Server
 ```powershell
@@ -167,7 +204,12 @@ python -m http.server 3000 --bind 127.0.0.1
 - `GET /api/v1/auth/me` — Retrieve current authenticated user profile.
 
 ### Products (`/api/v1/products`)
-- `GET /api/v1/products` — List all available products.
+- `GET /api/v1/products` — List products with query parameters:
+  - `page` (default 1)
+  - `page_size` (default 20, max 100)
+  - `min_price` / `max_price` (price range filters)
+  - `sort_by` (`name`, `price`, `created_at`, `stock`)
+  - `sort_order` (`asc`, `desc`)
 - `GET /api/v1/products/{id}` — Get single product details by ID.
 - `POST /api/v1/products` — Create new product record.
 
@@ -178,11 +220,13 @@ python -m http.server 3000 --bind 127.0.0.1
 - `DELETE /api/v1/cart/items/{id}` — Remove item from cart.
 
 ### Orders & Checkout (`/api/v1/orders`)
-- `POST /api/v1/orders` — **Atomic Checkout**: Locks items, checks stock, creates order, snapshots prices, deducts stock, clears cart.
+- `POST /api/v1/orders` — **Atomic Idempotent Checkout**:
+  - Accepts `Idempotency-Key` header.
+  - Locks product rows (`SELECT ... FOR UPDATE`), validates stock, creates order, snapshots prices, deducts stock, clears cart.
 - `GET /api/v1/orders` — List user's order history.
 - `GET /api/v1/orders/{id}` — Get specific order details (enforces ownership).
 
 ---
 
-## 📝 Work Log & Error Tracker
-Refer to **[abcd.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/abcd.txt)** for a step-by-step log documenting all 10 technical challenges and solutions implemented during development.
+## 📝 Technical Documentation Laboratory
+Refer to the **[docs/v2/](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v2/)** directory and **[v/v2.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v2.txt)** for detailed architectural blueprints, EXPLAIN ANALYZE query plans, concurrency analysis, and performance benchmark logs.
