@@ -41,7 +41,9 @@ MiniCommerce/
 ├── abcd.txt                  # Step-by-step work log & error tracker
 │
 ├── v/                        # Version Documentation Folder
-│   └── v1.md                 # Version 1 Architecture & Implementation Specification
+│   ├── v1.txt                # Master Version 1 Architecture, Work Log & Error Tracker
+│   └── script.txt            # Roadmap & Specification Guide for Future Version Files (v2, v3)
+
 │
 ├── backend/                  # FastAPI Application Root
 │   ├── app/

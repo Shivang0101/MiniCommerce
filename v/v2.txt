@@ -1,0 +1,169 @@
+================================================================================
+MINICOMMERCE V2 LABORATORY - MASTER VERSION 2 SPECIFICATION & WORK LOG (v2.txt)
+================================================================================
+
+Welcome to MiniCommerce Version 2 (V2) — a dedicated Database Engineering, Concurrency & Performance Laboratory. V2 builds upon the 4-tier FastAPI architecture of V1 by refactoring the backend into a 5-tier Data Layer Architecture (introducing the Repository Pattern), implementing row-level locking (`SELECT ... FOR UPDATE`), introducing idempotency key constraints, adding catalog pagination & filtering, and documenting EXPLAIN ANALYZE performance benchmarks.
+
+================================================================================
+SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS
+================================================================================
+
+MiniCommerce V2 strictly enforces a 5-tier layered architecture:
+
++-----------------------------------------------------------------------------+
+|                               HTTP REQUEST                                  |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                          MIDDLEWARE PIPELINE                                |
+|  - RequestIDMiddleware  (Attaches unique X-Request-ID UUID)               |
+|  - LoggingMiddleware    (Logs method, path, status, latency_ms)             |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                       ROUTER LAYER (app/api/v1/)                            |
+|  Thin controllers handling HTTP request validation & response serialization |
+|  - auth.py      (POST /register, POST /login, GET /me)                      |
+|  - products.py  (GET /products [page, filter, sort], GET /{id}, POST /)    |
+|  - cart.py      (GET /cart, POST /items, PATCH /items/{id}, DELETE /items)   |
+|  - orders.py    (POST /orders [Idempotency-Key], GET /orders, GET /{id})    |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                      SERVICE LAYER (app/services/)                          |
+|  Business logic, domain validations, transaction & idempotency rules        |
+|  - auth_service.py    (User registration & JWT authentication)            |
+|  - product_service.py (Catalog pagination, price filtering, sorting)        |
+|  - cart_service.py    (Cart item quantity management & validation)          |
+|  - order_service.py   (Idempotency key check, FOR UPDATE row locking)       |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                    REPOSITORY LAYER (app/repositories/)                     |
+|  Encapsulated Data Access & Query Execution                                 |
+|  - user_repository.py    (User email & ID queries)                          |
+|  - product_repository.py (OFFSET pagination, B-tree search, FOR UPDATE)   |
+|  - cart_repository.py    (Eager relationship loading & cart persistence)    |
+|  - order_repository.py   (Order creation & idempotency key lookup)         |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                     SQLALCHEMY ORM & POSTGRESQL DB                          |
+|  SQLAlchemy 2.x AsyncSession -> PgBouncer Pool -> PostgreSQL Constraints    |
++-----------------------------------------------------------------------------+
+
+================================================================================
+SECTION 2: FEATURES & KEY CODE SNIPPETS
+================================================================================
+
+1. Repository Pattern (`app/repositories/product_repository.py`):
+```python
+@staticmethod
+async def get_by_ids_for_update(db: AsyncSession, product_ids: list[uuid.UUID]) -> list[Product]:
+    # Enforces deterministic locking order to prevent deadlocks
+    sorted_ids = sorted(product_ids)
+    stmt = (
+        select(Product)
+        .where(Product.id.in_(sorted_ids))
+        .order_by(Product.id.asc())
+        .with_for_update()
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+```
+
+2. Idempotency Key Engine (`app/services/order_service.py`):
+```python
+if idempotency_key:
+    existing_order = await OrderRepository.get_by_idempotency_key(db, user_id, idempotency_key)
+    if existing_order:
+        return existing_order
+```
+
+3. Catalog Pagination, Filtering & Sorting (`app/repositories/product_repository.py`):
+```python
+stmt = select(Product)
+if min_price is not None:
+    stmt = stmt.where(Product.price >= min_price)
+if max_price is not None:
+    stmt = stmt.where(Product.price <= max_price)
+
+stmt = stmt.order_by(direction(sort_column)).offset((page - 1) * page_size).limit(page_size)
+```
+
+================================================================================
+SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS
+================================================================================
+
+1. `GET /api/v1/products`: Added `page`, `page_size`, `min_price`, `max_price`, `sort_by`, `sort_order` query parameters.
+2. `POST /api/v1/orders`: Added `Idempotency-Key` request header support.
+3. `orders` Table Schema: Added `idempotency_key` column (`String(255)`) and composite `UniqueConstraint("user_id", "idempotency_key")`.
+4. API Error Handling (`app/core/errors.py`): Standardized JSON error response payload including `code`, `message`, `detail`, and `request_id`.
+
+================================================================================
+SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES
+================================================================================
+
+1. Repository Layer (`app/repositories/`) created.
+2. Data Generator Script (`app/db/generate_load_data.py`) implemented for population of 500+ users, 2000+ products, and 1500+ orders.
+3. V2 Documentation Suite (`docs/v2/`) created with 8 technical specifications.
+
+================================================================================
+SECTION 5: STEP-BY-STEP WORK LOG
+================================================================================
+
+[STEP 1: ARCHITECTURE REFACTORING]
+Created `app/repositories/` package with `UserRepository`, `ProductRepository`, `CartRepository`, `OrderRepository`.
+
+[STEP 2: SERVICE LAYER INTEGRATION]
+Refactored `AuthService`, `ProductService`, `CartService`, `OrderService` to delegate all SQL queries to repositories.
+
+[STEP 3: CONCURRENCY & ROW-LEVEL LOCKING]
+Implemented `SELECT FOR UPDATE` on `ProductRepository.get_by_ids_for_update` with deterministic `ORDER BY id ASC` sorting.
+
+[STEP 4: IDEMPOTENCY KEY IMPLEMENTATION]
+Added `idempotency_key` field to `Order` model, database unique constraint, and header parsing in `orders.py` router.
+
+[STEP 5: CATALOG PAGINATION & FILTERING]
+Upgraded `ProductService.list_products` and `products.py` router with offset pagination and price filtering.
+
+[STEP 6: TESTING & VERIFICATION]
+Built 22 automated Pytest cases across `test_auth.py`, `test_cart.py`, `test_orders.py`, `test_products.py`, `test_repositories.py`, `test_idempotency.py`, and `test_concurrency.py`. 100% pass rate achieved.
+
+================================================================================
+SECTION 6: ERROR LOG & RESOLUTION TRACKER
+================================================================================
+
+- Error 1: `KeyError: 'detail'` in Pytest assertions after standardizing error response format.
+  * Solution: Updated `app/core/errors.py` to populate both `"detail"` and `"error"` fields in JSON responses.
+- Error 2: Session identity map caching returned stale stock values during Pytest integration tests.
+  * Solution: Invoked `db_session.expire_all()` after endpoint calls to re-read updated database state.
+- Error 3: Test session isolation conflict during concurrent HTTP request simulation.
+  * Solution: Updated `conftest.py` `client` fixture to yield fresh `TestSessionLocal()` database sessions per request.
+
+================================================================================
+SECTION 7: EXECUTION & VERIFICATION COMMANDS
+================================================================================
+
+# Activate Virtual Environment & Run Seed Data
+cd backend
+.\.venv\Scripts\Activate.ps1
+python app/db/seed.py
+
+# Generate Realistic Benchmark Dataset
+python app/db/generate_load_data.py
+
+# Run Full Pytest Suite (22/22 Passed)
+python -m pytest -v
+
+# Start FastAPI Backend Server
+python -m uvicorn app.main:app --reload --reload-exclude ".venv" --port 8000
+
+================================================================================
+STATUS: VERSION 2 FULLY OPERATIONAL & VERIFIED (22/22 TESTS PASSED)
+================================================================================

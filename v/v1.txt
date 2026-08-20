@@ -1,0 +1,265 @@
+================================================================================
+MINICOMMERCE V1 LABORATORY - MASTER VERSION 1 SPECIFICATION & WORK LOG (v1.txt)
+================================================================================
+
+Welcome to MiniCommerce Version 1 (V1) — a clean backend engineering laboratory built to demonstrate production-grade FastAPI architecture, PostgreSQL database design (via Supabase), SQLAlchemy 2.x ORM, Alembic migrations, JWT authentication, atomic checkout transactions, custom middleware, and automated testing, paired with a modern Vanilla JS SPA frontend.
+
+================================================================================
+SECTION 1: ARCHITECTURE SPECIFICATION & DIAGRAMS
+================================================================================
+
+MiniCommerce V1 strictly enforces a 4-tier layered architecture:
+
++-----------------------------------------------------------------------------+
+|                               HTTP REQUEST                                  |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                          MIDDLEWARE PIPELINE                                |
+|  - RequestIDMiddleware  (Attaches unique X-Request-ID UUID)               |
+|  - LoggingMiddleware    (Logs method, path, status, latency_ms)             |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                       ROUTER LAYER (app/api/v1/)                            |
+|  Thin controllers handling HTTP request validation & response serialization |
+|  - auth.py      (POST /register, POST /login, GET /me)                      |
+|  - products.py  (GET /products, GET /products/{id}, POST /products)         |
+|  - cart.py      (GET /cart, POST /items, PATCH /items/{id}, DELETE /items)   |
+|  - orders.py    (POST /orders, GET /orders, GET /orders/{id})                 |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                      SERVICE LAYER (app/services/)                          |
+|  Business logic, domain validations, atomic transactions                    |
+|  - auth_service.py    (User registration, authentication, JWT tokens)       |
+|  - product_service.py (Catalog querying, stock tracking)                    |
+|  - cart_service.py    (Auto-cart creation, stock validation, item quantity)  |
+|  - order_service.py   (Atomic checkout: stock lock, price snapshot, commit) |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                     SQLALCHEMY DB LAYER (app/models/)                       |
+|  SQLAlchemy 2.x Mapped ORM Models & Session Factory                         |
+|  - models/  (user.py, product.py, cart.py, order.py)                        |
+|  - db/      (session.py with statement_cache_size=0, seed.py)               |
++-----------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------+
+|                        SUPABASE POSTGRESQL DATABASE                         |
+|  PgBouncer Pooler Mode (aws-0-ap-south-1.pooler.supabase.com:6543)          |
++-----------------------------------------------------------------------------+
+
+Layer Specifications & Rules:
+1. Thin Routers: Route handlers only perform HTTP request validation, dependency injection (get_db, get_current_user), and response mapping.
+2. Business Rules in Services: All domain logic, validation, stock checks, and database transactions belong exclusively in the service layer.
+3. Pydantic Schemas vs ORM Models: Pydantic schemas (schemas/) represent API contracts; SQLAlchemy 2.x declarative models (models/) represent database persistence.
+4. No Raw SQL in Routers: All database operations use SQLAlchemy 2.x async select constructs and ORM sessions.
+
+================================================================================
+SECTION 2: FEATURES & KEY CODE SNIPPETS
+================================================================================
+
+1. Database Design & Persistence (PostgreSQL / Supabase):
+   - UUID Primary Keys: uuid.uuid4() for secure, non-sequential resource identifiers across all tables.
+   - Monetary Precision: Numeric(10,2) used for all monetary amounts (price, total_amount).
+   - Tables Implemented:
+     * users: id (UUID PK), email (String(255), unique, indexed), password_hash, created_at.
+     * products: id (UUID PK), name, description, price (Check >= 0), stock (Check >= 0), created_at, updated_at.
+     * carts: id (UUID PK), user_id (FK users.id, unique 1-to-1), created_at, updated_at.
+     * cart_items: id (UUID PK), cart_id (FK carts.id), product_id (FK products.id), quantity (Check > 0), UNIQUE(cart_id, product_id).
+     * orders: id (UUID PK), user_id (FK users.id), status (PENDING, CONFIRMED, CANCELLED), total_amount, created_at.
+     * order_items: id (UUID PK), order_id (FK orders.id), product_id (FK products.id), quantity, price (historical purchase price snapshot).
+
+2. PgBouncer Transaction Pooler Session Setup (app/db/session.py):
+   [CODE SNIPPET: PGBOUNCER STATEMENT CACHE FIX]
+   ```python
+   # Disabling prepared statement caching resolves PgBouncer transaction mode incompatibility
+   connect_args = {}
+   if "asyncpg" in db_url:
+       connect_args = {
+           "statement_cache_size": 0,
+           "prepared_statement_cache_size": 0
+       }
+
+   engine = create_async_engine(
+       db_url,
+       echo=False,
+       future=True,
+       connect_args=connect_args
+   )
+   ```
+
+3. Direct Bcrypt Hashing Security (app/core/security.py):
+   [CODE SNIPPET: DIRECT BCRYPT HASHING]
+   ```python
+   import bcrypt
+
+   def hash_password(password: str) -> str:
+       pwd_bytes = password.encode('utf-8')
+       salt = bcrypt.gensalt()
+       return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
+
+   def verify_password(plain_password: str, hashed_password: str) -> bool:
+       try:
+           return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+       except Exception:
+           return False
+   ```
+
+4. Atomic Checkout Transaction Engine (app/services/order_service.py):
+   [CODE SNIPPET: ATOMIC CHECKOUT FLOW]
+   ```python
+   async def create_order_checkout(db: AsyncSession, user_id: uuid.UUID) -> Order:
+       try:
+           # 1. Eagerly load user cart items
+           cart_stmt = (
+               select(Cart)
+               .where(Cart.user_id == user_id)
+               .options(selectinload(Cart.cart_items).selectinload(CartItem.product))
+               .execution_options(populate_existing=True)
+           )
+           cart = (await db.execute(cart_stmt)).scalar_one_or_none()
+
+           if not cart or not cart.cart_items:
+               raise HTTPException(status_code=400, detail="Cannot checkout with an empty cart")
+
+           total_amount = Decimal("0.00")
+           order_items_to_create = []
+
+           # 2. Validate stock & calculate total
+           for item in cart.cart_items:
+               product = item.product
+               if product.stock < item.quantity:
+                   raise HTTPException(
+                       status_code=409, 
+                       detail=f"Insufficient stock for product '{product.name}'"
+                   )
+
+               total_amount += Decimal(str(product.price)) * Decimal(str(item.quantity))
+               product.stock -= item.quantity  # Deduct stock
+
+               order_items_to_create.append({
+                   "product_id": product.id,
+                   "quantity": item.quantity,
+                   "price": product.price,  # Snapshot current price
+               })
+
+           # 3. Create Order & OrderItems
+           order = Order(user_id=user_id, status="CONFIRMED", total_amount=total_amount)
+           db.add(order)
+           await db.flush()
+
+           for item_data in order_items_to_create:
+               db.add(OrderItem(order_id=order.id, **item_data))
+
+           # 4. Clear cart items & commit atomically
+           for item in list(cart.cart_items):
+               await db.delete(item)
+
+           await db.commit()
+           return await OrderService.get_user_order_by_id(db, user_id, order.id)
+
+       except Exception:
+           await db.rollback()
+           raise
+   ```
+
+5. Request ID Middleware (app/middleware/request_id.py):
+   [CODE SNIPPET: REQUEST ID CORRELATION HEADER]
+   ```python
+   from starlette.middleware.base import BaseHTTPMiddleware
+   import uuid
+
+   class RequestIDMiddleware(BaseHTTPMiddleware):
+       async def dispatch(self, request, call_next):
+           request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+           request.state.request_id = request_id
+           response = await call_next(request)
+           response.headers["X-Request-ID"] = request_id
+           return response
+   ```
+
+================================================================================
+SECTION 3: STEP-BY-STEP WORK LOG & ERROR RESOLUTION TRACKER
+================================================================================
+
+[STEP 1: ARCHITECTURE DESIGN & PROJECT SETUP]
+- Problem: Build a clean, multi-layered FastAPI backend with PostgreSQL/SQLAlchemy 2.x, Alembic, JWT Auth, Cart management, Atomic Checkout transactions, and a Vanilla JS SPA frontend.
+- Solution Implemented: Created project structure adhering to strict 4-tier layer separation and middleware pipeline.
+
+[STEP 2: DEPENDENCY & ENVIRONMENT CONFIGURATION]
+- Problem: Ensure reproducible virtual environment and package dependencies.
+- Solution Implemented: Created python virtual environment (.venv) inside backend/.venv and installed dependencies.
+
+[STEP 3: SUPABASE POSTGRESQL CONNECTION & RESOLUTION]
+- Problem: Connect FastAPI backend to Supabase managed PostgreSQL database. Direct hostname db.[ref].supabase.co uses IPv6-only DNS AAAA records on some networks, causing socket.gaierror [Errno 11003]. Additionally, special characters like '@' in database passwords break connection string parsing.
+- Solution Implemented: Configured connection pooler URL using Supabase IPv4 Pooler hostname (aws-0-ap-south-1.pooler.supabase.com:6543) and URL-encoded '@' as '%40' in DATABASE_URL.
+
+[STEP 4: PGBOUNCER TRANSACTION POOLER COMPATIBILITY]
+- Problem: Uvicorn startup raised asyncpg.exceptions.DuplicatePreparedStatementError: prepared statement "__asyncpg_stmt_1__" already exists when executing against Supabase PgBouncer pooler (port 6543).
+- Solution Implemented: Configured app/db/session.py connect_args with statement_cache_size = 0 and prepared_statement_cache_size = 0.
+
+[STEP 5: SUPABASE DATABASE SCHEMA CREATION & SIMULATED SEEDING]
+- Problem: Create every database table on live Supabase PostgreSQL and populate simulated rows for testing.
+- Solution Implemented: Executed app/db/seed.py against Supabase PostgreSQL populating users, products, active cart for Alice, and confirmed order for Bob.
+
+[STEP 6: DETAILED ERROR LOG & RESOLUTION TRACKER]
+- Error 1: ModuleNotFoundError: No module named 'passlib'
+  * Solution: Installed passlib[bcrypt] and bcrypt into .venv.
+- Error 2: ImportError: email-validator is not installed, run pip install pydantic[email]
+  * Solution: Added email-validator>=2.1.0 to requirements.txt for Pydantic EmailStr validation.
+- Error 3: ValueError: password cannot be longer than 72 bytes (Passlib 1.7.4 / Bcrypt 5.0 compatibility bug)
+  * Solution: Replaced passlib CryptContext with direct bcrypt routines (bcrypt.hashpw and bcrypt.checkpw) in app/core/security.py.
+- Error 4: InvalidRequestError: When initializing mapper Mapper[User(users)], expression 'Cart' failed to locate a name ('Cart')
+  * Solution: Updated app/db/seed.py to import Base, User, Product, Cart, CartItem, Order, OrderItem from app.db.base.
+- Error 5: MissingGreenlet: greenlet_spawn has not been called when accessing relationship attributes during checkout
+  * Solution: Eagerly loaded relationships using selectinload(Cart.cart_items).selectinload(CartItem.product) with populate_existing=True.
+- Error 6: Browser ERR_ADDRESS_INVALID on IPv6 host notation [::]:3000
+  * Solution: Added --bind 127.0.0.1 flag to python -m http.server command.
+- Error 7: socket.gaierror: [Errno 11003] getaddrinfo failed on direct Supabase hostname db.[ref].supabase.co
+  * Solution: Configured IPv4-supported connection pooler hostname aws-0-ap-south-1.pooler.supabase.com:6543.
+- Error 8: Password URL parsing error due to raw '@' in password MiniCommerceDB@123@123@123
+  * Solution: URL-encoded '@' to '%40' in DATABASE_URL.
+- Error 9: asyncpg.exceptions.DuplicatePreparedStatementError on PgBouncer startup
+  * Solution: Added statement_cache_size=0 and prepared_statement_cache_size=0 to connect_args in app/db/session.py.
+- Error 10: Uvicorn infinite reload loop scanning .venv
+  * Solution: Added --reload-exclude ".venv" flag to uvicorn command line.
+
+[STEP 7: VERSIONING DOCUMENTATION & REPOSITORY SECURITY]
+- Requirement: Document Version 1 architecture specification and configure git repository rules to protect secrets and logs.
+- Solution Implemented: Created v/v1.txt, root README.md, and configured .gitignore.
+
+[STEP 8: STUDENT DEV BLOG & REFLECTIVE DOCUMENTATION]
+- Requirement: Create blog/ directory and write blog1.txt recording the student's first-time experience building MiniCommerce V1 based on implementation plans, work logs, major architecture decisions, and bug fixes.
+- Solution Implemented: Created blog/blog1.txt capturing student developer reflections and technical deep dive.
+
+================================================================================
+SECTION 4: EXECUTION & STARTUP COMMANDS
+================================================================================
+
+# Activate Virtual Environment
+cd backend
+.\.venv\Scripts\Activate.ps1
+
+# Run Seed Script
+.\.venv\Scripts\python.exe app/db/seed.py
+
+# Run Pytest Suite (17/17 Passed)
+.\.venv\Scripts\python.exe -m pytest -v
+
+# Run FastAPI Backend Server
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --reload-exclude ".venv" --port 8000
+
+# Run Frontend SPA Server (separate terminal)
+cd frontend
+python -m http.server 3000 --bind 127.0.0.1
+
+================================================================================
+STATUS: VERSION 1 FULLY OPERATIONAL & VERIFIED ON SUPABASE POSTGRESQL
+================================================================================

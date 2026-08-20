@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_v1_router
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.logging import LoggingMiddleware
+from app.core.errors import api_exception_handler
 from app.db.session import engine
 from app.db.base import Base
 
@@ -15,11 +16,14 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="MiniCommerce V1 Laboratory",
-    description="Clean, modular e-commerce backend engineering laboratory",
-    version="1.0.0",
+    title="MiniCommerce V2 Laboratory",
+    description="Database Engineering, Concurrency & Performance Laboratory",
+    version="2.0.0",
     lifespan=lifespan
 )
+
+# Exception handlers
+app.add_exception_handler(HTTPException, api_exception_handler)
 
 # CORS configuration
 app.add_middleware(
@@ -39,4 +43,4 @@ app.include_router(api_v1_router)
 
 @app.get("/")
 async def root():
-    return {"name": "MiniCommerce V1 Laboratory API", "status": "running", "docs": "/docs"}
+    return {"name": "MiniCommerce V2 Laboratory API", "version": "2.0.0", "status": "running", "docs": "/docs"}

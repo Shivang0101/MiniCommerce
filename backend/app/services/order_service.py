@@ -1,43 +1,49 @@
 import uuid
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
-from app.models.cart import Cart, CartItem
-from app.models.product import Product
-from app.models.order import Order, OrderItem
+from app.models.order import Order
+from app.repositories.order_repository import OrderRepository
+from app.repositories.cart_repository import CartRepository
+from app.repositories.product_repository import ProductRepository
 
 class OrderService:
     @staticmethod
-    async def create_order_checkout(db: AsyncSession, user_id: uuid.UUID) -> Order:
-        try:
-            # 1. Fetch user's cart with cart items and products eagerly loaded
-            cart_stmt = (
-                select(Cart)
-                .where(Cart.user_id == user_id)
-                .options(selectinload(Cart.cart_items).selectinload(CartItem.product))
-                .execution_options(populate_existing=True)
-            )
-            cart_res = await db.execute(cart_stmt)
-            cart = cart_res.scalar_one_or_none()
+    async def create_order_checkout(
+        db: AsyncSession, 
+        user_id: uuid.UUID, 
+        idempotency_key: str | None = None
+    ) -> Order:
+        # 1. Idempotency Check: if idempotency_key is provided, check if order already exists
+        if idempotency_key:
+            existing_order = await OrderRepository.get_by_idempotency_key(db, user_id, idempotency_key)
+            if existing_order:
+                return existing_order
 
+        try:
+            # 2. Fetch user's cart
+            cart = await CartRepository.get_by_user_id(db, user_id)
             if not cart or not cart.cart_items:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot checkout with an empty cart"
                 )
 
-            # 2. Check stock & calculate total
+            # 3. Eagerly lock products with FOR UPDATE in deterministic ID order to prevent deadlocks
+            product_ids = [item.product_id for item in cart.cart_items]
+            locked_products = await ProductRepository.get_by_ids_for_update(db, product_ids)
+            product_map = {p.id: p for p in locked_products}
+
+            # 4. Check stock & calculate total
             total_amount = Decimal("0.00")
             order_items_to_create = []
 
             for item in cart.cart_items:
-                product = item.product
+                product = product_map.get(item.product_id)
                 if not product:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Associated product not found"
+                        detail=f"Associated product '{item.product_id}' not found"
                     )
 
                 if product.stock < item.quantity:
@@ -49,43 +55,41 @@ class OrderService:
                 item_total = Decimal(str(product.price)) * Decimal(str(item.quantity))
                 total_amount += item_total
 
-                # Deduct stock
+                # Deduct stock on locked product instance
                 product.stock -= item.quantity
 
                 order_items_to_create.append({
                     "product_id": product.id,
                     "quantity": item.quantity,
-                    "price": product.price, # Snapshot current price
+                    "price": product.price,
                 })
 
-            # 3. Create Order
-            order = Order(
+            # 5. Create Order & OrderItems
+            order = await OrderRepository.create_order(
+                db,
                 user_id=user_id,
                 status="CONFIRMED",
-                total_amount=total_amount
+                total_amount=total_amount,
+                idempotency_key=idempotency_key
             )
-            db.add(order)
-            await db.flush() # Populate order.id
 
-            # 4. Create OrderItems
             for item_data in order_items_to_create:
-                order_item = OrderItem(
+                await OrderRepository.add_order_item(
+                    db,
                     order_id=order.id,
                     product_id=item_data["product_id"],
                     quantity=item_data["quantity"],
                     price=item_data["price"]
                 )
-                db.add(order_item)
 
-            # 5. Delete Cart Items
-            for item in list(cart.cart_items):
-                await db.delete(item)
+            # 6. Clear Cart Items
+            await CartRepository.clear_cart_items(db, cart)
 
-            # Commit the transaction atomically
+            # 7. Commit transaction atomically
             await db.commit()
 
-            # Return order eagerly loaded
-            return await OrderService.get_user_order_by_id(db, user_id, order.id)
+            # Return eagerly loaded created order
+            return await OrderRepository.get_by_id_for_user(db, user_id, order.id)
 
         except HTTPException:
             await db.rollback()
@@ -99,30 +103,11 @@ class OrderService:
 
     @staticmethod
     async def get_user_orders(db: AsyncSession, user_id: uuid.UUID) -> list[Order]:
-        stmt = (
-            select(Order)
-            .where(Order.user_id == user_id)
-            .options(
-                selectinload(Order.order_items).selectinload(OrderItem.product)
-            )
-            .execution_options(populate_existing=True)
-            .order_by(Order.created_at.desc())
-        )
-        result = await db.execute(stmt)
-        return list(result.scalars().all())
+        return await OrderRepository.list_by_user_id(db, user_id)
 
     @staticmethod
     async def get_user_order_by_id(db: AsyncSession, user_id: uuid.UUID, order_id: uuid.UUID) -> Order:
-        stmt = (
-            select(Order)
-            .where(Order.id == order_id, Order.user_id == user_id)
-            .options(
-                selectinload(Order.order_items).selectinload(OrderItem.product)
-            )
-            .execution_options(populate_existing=True)
-        )
-        result = await db.execute(stmt)
-        order = result.scalar_one_or_none()
+        order = await OrderRepository.get_by_id_for_user(db, user_id, order_id)
         if not order:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

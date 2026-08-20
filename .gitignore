@@ -54,3 +54,7 @@ htmlcov/
 # OS Generated
 .DS_Store
 Thumbs.db
+
+blog/
+abcd.txt
+implementation_plan.txt

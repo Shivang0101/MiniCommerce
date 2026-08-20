@@ -8,7 +8,7 @@ from app.main import app
 from app.db.base import Base
 from app.api.deps import get_db
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_temp.db"
 
 test_engine = create_async_engine(
     TEST_DATABASE_URL,
@@ -43,7 +43,8 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def _get_test_db():
-        yield db_session
+        async with TestSessionLocal() as session:
+            yield session
 
     app.dependency_overrides[get_db] = _get_test_db
     transport = ASGITransport(app=app)

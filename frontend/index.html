@@ -58,10 +58,36 @@
 
     <!-- Main Content Container -->
     <main class="main-container">
-      <!-- Section Title & Filter -->
+      <!-- Section Title & Filter Controls -->
       <div class="section-header">
-        <h2>Product Catalog</h2>
-        <span id="product-count" class="badge badge-info">Loading products...</span>
+        <div>
+          <h2>Product Catalog <span class="v2-tag">V2</span></h2>
+          <span id="product-count" class="badge badge-info">Loading products...</span>
+        </div>
+
+        <div class="catalog-controls">
+          <div class="control-group">
+            <label for="sort-by-select">Sort:</label>
+            <select id="sort-by-select" class="form-select">
+              <option value="name">Name</option>
+              <option value="price">Price</option>
+              <option value="stock">Stock</option>
+              <option value="created_at">Newest</option>
+            </select>
+            <select id="sort-order-select" class="form-select">
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Price:</label>
+            <input type="number" id="min-price-input" placeholder="Min $" min="0" class="form-input-sm">
+            <span>-</span>
+            <input type="number" id="max-price-input" placeholder="Max $" min="0" class="form-input-sm">
+            <button id="apply-filter-btn" class="btn btn-secondary btn-sm">Filter</button>
+          </div>
+        </div>
       </div>
 
       <!-- Products Grid -->
@@ -69,6 +95,13 @@
         <div class="skeleton-card"></div>
         <div class="skeleton-card"></div>
         <div class="skeleton-card"></div>
+      </div>
+
+      <!-- Pagination Container -->
+      <div class="pagination-container">
+        <button id="prev-page-btn" class="btn btn-outline btn-sm" disabled>&laquo; Previous</button>
+        <span id="page-indicator" class="page-indicator">Page 1</span>
+        <button id="next-page-btn" class="btn btn-outline btn-sm">Next &raquo;</button>
       </div>
     </main>
 

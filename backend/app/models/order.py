@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from sqlalchemy import String, Numeric, Integer, DateTime, ForeignKey, func, UUID
+from sqlalchemy import String, Numeric, Integer, DateTime, ForeignKey, func, UUID, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
@@ -13,8 +13,13 @@ if TYPE_CHECKING:
 class Order(Base):
     __tablename__ = "orders"
 
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_user_idempotency_key"),
+    )
+
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="PENDING")
     total_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

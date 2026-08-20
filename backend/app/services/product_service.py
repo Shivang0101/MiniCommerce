@@ -1,28 +1,19 @@
 import uuid
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from fastapi import HTTPException, status
 from app.models.product import Product
 from app.schemas.product import ProductCreate
+from app.repositories.product_repository import ProductRepository
 
 class ProductService:
     @staticmethod
     async def create_product(db: AsyncSession, product_in: ProductCreate) -> Product:
-        product = Product(
-            name=product_in.name,
-            description=product_in.description,
-            price=product_in.price,
-            stock=product_in.stock
-        )
-        db.add(product)
-        await db.commit()
-        await db.refresh(product)
-        return product
+        return await ProductRepository.create(db, product_in)
 
     @staticmethod
     async def get_product(db: AsyncSession, product_id: uuid.UUID) -> Product:
-        result = await db.execute(select(Product).where(Product.id == product_id))
-        product = result.scalar_one_or_none()
+        product = await ProductRepository.get_by_id(db, product_id)
         if not product:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -31,6 +22,22 @@ class ProductService:
         return product
 
     @staticmethod
-    async def list_products(db: AsyncSession) -> list[Product]:
-        result = await db.execute(select(Product).order_by(Product.name))
-        return list(result.scalars().all())
+    async def list_products(
+        db: AsyncSession,
+        page: int = 1,
+        page_size: int = 20,
+        min_price: Decimal | None = None,
+        max_price: Decimal | None = None,
+        sort_by: str = "name",
+        sort_order: str = "asc"
+    ) -> list[Product]:
+        products, total_count = await ProductRepository.list_products(
+            db,
+            page=page,
+            page_size=page_size,
+            min_price=min_price,
+            max_price=max_price,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
+        return products

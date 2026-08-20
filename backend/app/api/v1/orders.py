@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
@@ -10,10 +10,11 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def checkout(
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    return await OrderService.create_order_checkout(db, current_user.id)
+    return await OrderService.create_order_checkout(db, current_user.id, idempotency_key=idempotency_key)
 
 @router.get("", response_model=list[OrderResponse])
 async def list_orders(

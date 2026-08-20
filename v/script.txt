@@ -1,0 +1,69 @@
+================================================================================
+MINICOMMERCE VERSION DOCUMENTATION SPECIFICATION (v/script.txt)
+================================================================================
+
+PURPOSE:
+This script defines the mandatory structure, architectural roadmap, and documentation guidelines for all future version tracking files (v2.txt, v3.txt, etc.) in the v/ directory.
+
+Every version file (vN.txt) represents a complete, self-contained record of that version's architecture, new features, infrastructure changes, step-by-step implementation work logs, bug fixes, key code snippets, visual architecture diagrams, and verification commands.
+
+================================================================================
+SECTION 1: ROADMAP & SCOPE FOR UPCOMING VERSIONS
+================================================================================
+
+1. VERSION 2 SCOPE (v2.txt):
+   - Caching Layer: Integrate Redis for high-performance product catalog caching (GET /products) with TTL cache invalidation.
+   - Containerization: Write Dockerfiles and docker-compose.yml orchestrating FastAPI, PostgreSQL (or Supabase local runner), and Redis services.
+   - Asynchronous Background Tasks: Integrate Celery with Redis broker for offloading non-blocking tasks (e.g., order confirmation emails, inventory threshold alerts).
+   - Security & Rate Limiting: Add Redis-backed sliding window rate limiting middleware to prevent API abuse.
+
+2. VERSION 3 SCOPE (v3.txt):
+   - Event-Driven Architecture: Integrate Apache Kafka / RabbitMQ for event-driven message broadcasting (OrderPlaced, StockDeducted, PaymentProcessed).
+   - Microservices Refactoring: Decouple backend into isolated microservices (Auth Service, Product/Inventory Service, Order Fulfillment Service).
+   - Kubernetes Deployment: Write K8s manifests (Deployments, StatefulSets, Services, Ingress, ConfigMaps, Secrets).
+   - Cloud & Observability: Integrate Prometheus metrics scraper, Grafana dashboards, and AWS cloud deployment patterns.
+
+================================================================================
+SECTION 2: MANDATORY STRUCTURE FOR FUTURE VERSION FILES (v2.txt, v3.txt...)
+================================================================================
+
+When generating or updating any future vN.txt file, follow this exact structure:
+
+--------------------------------------------------------------------------------
+HEADER: MINICOMMERCE VN LABORATORY - MASTER VERSION N SPECIFICATION & WORK LOG
+--------------------------------------------------------------------------------
+
+[SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS]
+- High-level overview of what this version accomplishes.
+- MUST INCLUDE: Clear ASCII or Mermaid architectural diagrams showing component data flows, service boundaries, and request pipelines (e.g., Client -> Redis Cache -> PostgreSQL -> Celery -> Worker).
+
+[SECTION 2: NEW TECHNOLOGIES & CORE CODE SNIPPETS]
+- List of new frameworks, infrastructure components, databases, or message brokers added in this version.
+- MUST INCLUDE: Key code snippets for core algorithms, session configurations, middleware, cache wrappers, or async workers.
+  * Examples: Redis cache decorator code, Celery task definitions, Docker compose files, Kafka producer/consumer code.
+
+[SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS]
+- Detailed list of new or updated endpoints, schemas, services, and models.
+- Database migration changes (Alembic revision details).
+
+[SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES]
+- Configuration environment variables (.env additions).
+- Docker, Kubernetes, or service orchestration configs introduced.
+
+[SECTION 5: STEP-BY-STEP WORK LOG]
+- Chronological step-by-step log of development phases executed during this version.
+
+[SECTION 6: ERROR LOG & RESOLUTION TRACKER]
+- Comprehensive list of every bug, exception, or infrastructure issue encountered during this version.
+- Format for each error entry:
+  * Error: [Exact error message or exception]
+  * Symptom: [Observed behavior]
+  * Root Cause: [Why the issue occurred]
+  * Solution: [Exact fix applied with file references & code snippet if applicable]
+
+[SECTION 7: EXECUTION, TESTING & VERIFICATION COMMANDS]
+- Exact commands to seed data, run automated tests, launch containerized environments, and start services.
+
+================================================================================
+END OF SPECIFICATION
+================================================================================

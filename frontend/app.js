@@ -1,4 +1,4 @@
-// MiniCommerce V1 SPA Client
+// MiniCommerce V2 SPA Client
 const API_BASE = "http://localhost:8000/api/v1";
 
 // State
@@ -7,6 +7,14 @@ let currentUser = null;
 let cart = { cart_items: [] };
 let products = [];
 let orders = [];
+
+// V2 Catalog State
+let currentPage = 1;
+const pageSize = 6;
+let sortBy = "name";
+let sortOrder = "asc";
+let minPrice = null;
+let maxPrice = null;
 
 // DOM Elements
 const authButtons = document.getElementById("auth-buttons");
@@ -18,6 +26,15 @@ const openLoginBtn = document.getElementById("open-login-btn");
 
 const productsGrid = document.getElementById("products-grid");
 const productCount = document.getElementById("product-count");
+const sortBySelect = document.getElementById("sort-by-select");
+const sortOrderSelect = document.getElementById("sort-order-select");
+const minPriceInput = document.getElementById("min-price-input");
+const maxPriceInput = document.getElementById("max-price-input");
+const applyFilterBtn = document.getElementById("apply-filter-btn");
+
+const prevPageBtn = document.getElementById("prev-page-btn");
+const nextPageBtn = document.getElementById("next-page-btn");
+const pageIndicator = document.getElementById("page-indicator");
 
 const cartToggleBtn = document.getElementById("cart-toggle-btn");
 const cartBadge = document.getElementById("cart-badge");
@@ -47,8 +64,8 @@ const toastContainer = document.getElementById("toast-container");
 let authMode = "login"; // "login" | "register"
 
 // Utility: API Fetcher
-async function apiRequest(endpoint, method = "GET", body = null, useAuth = true) {
-  const headers = { "Content-Type": "application/json" };
+async function apiRequest(endpoint, method = "GET", body = null, useAuth = true, extraHeaders = {}) {
+  const headers = { "Content-Type": "application/json", ...extraHeaders };
   if (useAuth && token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -62,7 +79,8 @@ async function apiRequest(endpoint, method = "GET", body = null, useAuth = true)
     const response = await fetch(`${API_BASE}${endpoint}`, options);
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.detail || "API Request failed");
+      const msg = data.error ? data.error.message : (data.detail || "API Request failed");
+      throw new Error(msg);
     }
     return data;
   } catch (err) {
@@ -107,10 +125,14 @@ function renderUserUI() {
   }
 }
 
-// Products
+// Products with Pagination & Filtering
 async function fetchProducts() {
   try {
-    products = await apiRequest("/products", "GET", null, false);
+    let query = `/products?page=${currentPage}&page_size=${pageSize}&sort_by=${sortBy}&sort_order=${sortOrder}`;
+    if (minPrice !== null && minPrice !== "") query += `&min_price=${minPrice}`;
+    if (maxPrice !== null && maxPrice !== "") query += `&max_price=${maxPrice}`;
+
+    products = await apiRequest(query, "GET", null, false);
     renderProducts();
   } catch (err) {
     productCount.innerText = "Error loading products";
@@ -119,11 +141,15 @@ async function fetchProducts() {
 }
 
 function renderProducts() {
-  productCount.innerText = `${products.length} Products Available`;
+  productCount.innerText = `Page ${currentPage} (${products.length} Items)`;
+  pageIndicator.innerText = `Page ${currentPage}`;
+  prevPageBtn.disabled = (currentPage === 1);
+  nextPageBtn.disabled = (products.length < pageSize);
+
   productsGrid.innerHTML = "";
 
   if (products.length === 0) {
-    productsGrid.innerHTML = "<p>No products found in lab database.</p>";
+    productsGrid.innerHTML = "<p style='grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 2rem 0;'>No products found matching filters.</p>";
     return;
   }
 
@@ -254,14 +280,16 @@ async function handleCartRemove(cartItemId) {
   }
 }
 
-// Atomic Checkout
+// Atomic Idempotent Checkout
 async function handleCheckout() {
   if (!token) return;
   checkoutBtn.disabled = true;
   checkoutBtn.innerText = "Processing Checkout...";
 
+  const idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
   try {
-    const order = await apiRequest("/orders", "POST");
+    const order = await apiRequest("/orders", "POST", null, true, { "Idempotency-Key": idempotencyKey });
     showToast(`Order #${order.id.slice(0, 8)} confirmed! Total: $${parseFloat(order.total_amount).toFixed(2)}`, "success");
     await fetchCart();
     await fetchProducts(); // Refresh stock
@@ -351,6 +379,7 @@ function renderOrders() {
       <div class="order-header">
         <div>
           <span class="order-id">Order #${o.id.slice(0, 8)}</span>
+          ${o.idempotency_key ? `<span class="badge badge-info" style="margin-left: 0.5rem;">Idempotent</span>` : ''}
           <div style="font-size: 0.75rem; color: var(--text-muted);">${dateStr}</div>
         </div>
         <span class="order-status">${o.status}</span>
@@ -436,6 +465,38 @@ function setupEventListeners() {
 
   ordersBtn.addEventListener("click", openOrdersModal);
   closeOrdersBtn.addEventListener("click", () => ordersModal.classList.add("hidden"));
+
+  // Catalog Filter & Sort Event Handlers
+  sortBySelect.addEventListener("change", () => {
+    sortBy = sortBySelect.value;
+    currentPage = 1;
+    fetchProducts();
+  });
+
+  sortOrderSelect.addEventListener("change", () => {
+    sortOrder = sortOrderSelect.value;
+    currentPage = 1;
+    fetchProducts();
+  });
+
+  applyFilterBtn.addEventListener("click", () => {
+    minPrice = minPriceInput.value ? parseFloat(minPriceInput.value) : null;
+    maxPrice = maxPriceInput.value ? parseFloat(maxPriceInput.value) : null;
+    currentPage = 1;
+    fetchProducts();
+  });
+
+  prevPageBtn.addEventListener("click", () => {
+    if (currentPage > 1) {
+      currentPage--;
+      fetchProducts();
+    }
+  });
+
+  nextPageBtn.addEventListener("click", () => {
+    currentPage++;
+    fetchProducts();
+  });
 
   // Delegated events on product grid & cart
   productsGrid.addEventListener("click", e => {

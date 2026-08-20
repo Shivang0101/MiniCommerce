@@ -1,45 +1,24 @@
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
-from app.models.cart import Cart, CartItem
-from app.models.product import Product
+from app.models.cart import Cart
 from app.schemas.cart import CartItemCreate, CartItemUpdate
+from app.repositories.cart_repository import CartRepository
+from app.repositories.product_repository import ProductRepository
 
 class CartService:
     @staticmethod
     async def get_or_create_cart(db: AsyncSession, user_id: uuid.UUID) -> Cart:
-        stmt = (
-            select(Cart)
-            .where(Cart.user_id == user_id)
-            .options(selectinload(Cart.cart_items).selectinload(CartItem.product))
-            .execution_options(populate_existing=True)
-        )
-        result = await db.execute(stmt)
-        cart = result.scalar_one_or_none()
-
-        if not cart:
-            cart = Cart(user_id=user_id)
-            db.add(cart)
-            await db.commit()
-            result = await db.execute(stmt)
-            cart = result.scalar_one()
-
-        return cart
+        return await CartRepository.get_or_create_by_user_id(db, user_id)
 
     @staticmethod
     async def add_item(db: AsyncSession, user_id: uuid.UUID, item_in: CartItemCreate) -> Cart:
         cart = await CartService.get_or_create_cart(db, user_id)
         
-        # Check product existence
-        product_stmt = select(Product).where(Product.id == item_in.product_id)
-        product_res = await db.execute(product_stmt)
-        product = product_res.scalar_one_or_none()
+        product = await ProductRepository.get_by_id(db, item_in.product_id)
         if not product:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-        # Find if item already exists in cart
         existing_item = next((item for item in cart.cart_items if item.product_id == item_in.product_id), None)
         current_qty = existing_item.quantity if existing_item else 0
         new_qty = current_qty + item_in.quantity
@@ -50,17 +29,7 @@ class CartService:
                 detail=f"Requested quantity ({new_qty}) exceeds available stock ({product.stock})"
             )
 
-        if existing_item:
-            existing_item.quantity = new_qty
-        else:
-            new_item = CartItem(
-                cart_id=cart.id,
-                product_id=item_in.product_id,
-                quantity=item_in.quantity
-            )
-            db.add(new_item)
-
-        await db.commit()
+        await CartRepository.add_item(db, cart.id, item_in.product_id, item_in.quantity)
         return await CartService.get_or_create_cart(db, user_id)
 
     @staticmethod
@@ -80,8 +49,7 @@ class CartService:
                 detail=f"Requested quantity ({item_in.quantity}) exceeds available stock ({product.stock})"
             )
 
-        cart_item.quantity = item_in.quantity
-        await db.commit()
+        await CartRepository.update_item_quantity(db, cart_item_id, item_in.quantity)
         return await CartService.get_or_create_cart(db, user_id)
 
     @staticmethod
@@ -92,6 +60,5 @@ class CartService:
         if not cart_item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cart item not found")
 
-        await db.delete(cart_item)
-        await db.commit()
+        await CartRepository.delete_item(db, cart_item_id)
         return await CartService.get_or_create_cart(db, user_id)
