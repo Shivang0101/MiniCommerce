@@ -393,7 +393,10 @@ python app/db/seed.py
 # 3. Seed Production Benchmark Dataset (10k Users, 50k Products, 100k Orders)
 python -m app.db.generate_load_data 10000 50000 100000
 
-# 4. Run Full Automated Pytest Integration Suite (22/22 Passed)
+# 4. Run Benchmark Laboratory Suite (Recreate query-analysis.md & performance.md)
+python -m app.db.run_benchmarks
+
+# 5. Run Full Automated Pytest Integration Suite (22/22 Passed)
 python -m pytest -v
 
 # 5. Launch FastAPI Backend Server
