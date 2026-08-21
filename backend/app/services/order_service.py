@@ -88,6 +88,10 @@ class OrderService:
             # 7. Commit transaction atomically
             await db.commit()
 
+            # 8. Invalidate product catalog cache upon stock update
+            from app.services.cache_service import CacheService
+            await CacheService.invalidate_product_cache()
+
             # Return eagerly loaded created order
             return await OrderRepository.get_by_id_for_user(db, user_id, order.id)
 

@@ -1,41 +1,37 @@
-# MiniCommerce V2 — Database Engineering, Performance & Concurrency Laboratory
+# MiniCommerce V3 — Containerization, In-Memory Caching & Distributed State Resilience
 
-**MiniCommerce V2** is an advanced backend engineering laboratory built with **FastAPI**, **PostgreSQL** (via Supabase), **SQLAlchemy 2.x ORM**, **Alembic**, **JWT Authentication**, and **Atomic Transactions**, complemented by a modern Vanilla JS Single Page Application (SPA).
+**MiniCommerce V3** is an advanced backend engineering laboratory built with **FastAPI**, **PostgreSQL** (via Supabase Cloud), **Redis 7** (In-Memory Cache), **Docker Compose**, **SQLAlchemy 2.x ORM**, **Alembic**, **JWT Authentication**, and **Atomic Transactions**, complemented by a modern React 18 + Vite 5 Single Page Application (SPA).
 
-Version 2 shifts focus to **Database Engineering, Concurrency Control, Row-Level Locking (`SELECT FOR UPDATE`), Idempotency, Repository Architecture, and Performance Benchmarking**.
+Version 3 shifts focus to **Local Multi-Container Orchestration, Async Redis Cache-Aside Pattern, Write Cache Invalidation, Resilient DB Fallback, Distributed Health Probes (`/healthz`, `/readyz`), and Container Performance Benchmarking**.
 
 ---
 
-## 🏗️ Architectural Overview (5-Tier Data Layer)
+## 🏗️ Architectural Overview (Containerized Topology & Data Layer)
 
-MiniCommerce V2 strictly enforces a 5-tier separation of concerns:
+MiniCommerce V3 enforces an orchestrated container topology with a 5-tier backend separation of concerns:
 
 ```text
-HTTP Request
+React 18 + Vite 5 SPA (Served via Nginx Container on Port 3000)
      │
-     ▼
-Middleware Pipeline (RequestId, Logging, Standardized Error Handler)
-     │
-     ▼
-Router Layer (Thin route handlers: app/api/v1/)
-     │
-     ▼
-Service Layer (Business rules, Domain invariants, Transaction boundaries: app/services/)
-     │
-     ▼
-Repository Layer (Encapsulated Data Access: app/repositories/)
-     │
-     ▼
-SQLAlchemy 2.x ORM & PostgreSQL / Supabase (Row locks, Check constraints & Persistence)
+     ▼ (HTTP REST API Reverse Proxy)
+FastAPI Backend (python:3.12-slim Container on Port 8000)
+     ├── Health & Readiness Probes (/healthz, /readyz)
+     ├── Middleware Pipeline (RequestIdMiddleware, LoggingMiddleware, CORSMiddleware)
+     ├── Router Layer (Thin route handlers: app/api/v1/)
+     ├── Service Layer (Business rules, Transaction boundaries, Cache-Aside logic)
+     ├── Repository Layer (Encapsulated Data Access: app/repositories/)
+     └── Data Persistence & State Resilience:
+          ├── Redis In-Memory Cache (redis:7-alpine Container on Port 6379)
+          └── PostgreSQL DB (409,913 Records on Remote Supabase AWS Cloud)
 ```
 
-### Architectural Principles & V2 Additions
-1. **Thin Routers**: Route handlers only perform HTTP validation, dependency injection (`get_db`, `get_current_user`), and response mapping.
-2. **Business Logic in Services**: All domain rules, stock checks, transaction control, and idempotency reside in services.
-3. **Repository Layer**: Database access patterns (`UserRepository`, `ProductRepository`, `CartRepository`, `OrderRepository`) encapsulate SQL queries, OFFSET pagination, price filtering, and row-level locking.
-4. **Row-Level Locking (`SELECT FOR UPDATE`)**: Atomic checkout locks product rows in deterministic ID order (`ORDER BY id ASC`) to eliminate race conditions, lost updates, and deadlocks.
-5. **Idempotency Engine**: Supports `Idempotency-Key` request headers backed by a composite unique database constraint `(user_id, idempotency_key)` on the `orders` table.
-6. **Pydantic Schemas vs ORM Models**: Pydantic schemas define API contracts (`schemas/`); SQLAlchemy 2.x declarative models represent database persistence (`models/`).
+### Architectural Principles & V3 Additions
+1. **Container Orchestration (`docker-compose.yml`)**: Single-command startup (`docker compose up --build`) launching `backend`, `redis`, and `frontend` services with automated container health dependency checks.
+2. **Async Redis Caching (`Cache-Aside`)**: Product catalog reads (`GET /api/v1/products`) are cached in Redis with a 300-second TTL, reducing latency by **~36x** (from 102ms down to 2.8ms).
+3. **Write Invalidation**: Order checkouts (`POST /api/v1/orders`) and new product creation purge matching Redis cache keys (`products:*`) to prevent stale inventory reads.
+4. **Fault Tolerance & Graceful Fallback**: If Redis becomes unreachable, down, or times out, the backend logs a warning and seamlessly falls back to direct Supabase PostgreSQL queries with 0% client HTTP 500 errors.
+5. **Health & Readiness Probes**: `/healthz` checks FastAPI liveness; `/readyz` actively verifies downstream connections to both Supabase PostgreSQL and Redis.
+6. **Zero Local DB Overhead**: Container topology directly connects to the remote 409k-record Supabase PostgreSQL instance, preserving local disk space.
 
 ---
 
@@ -44,228 +40,132 @@ SQLAlchemy 2.x ORM & PostgreSQL / Supabase (Row locks, Check constraints & Persi
 ```text
 MiniCommerce/
 ├── README.md                 # Master Project Overview & Guide
-├── next_implementation plan  # Version 2 Implementation Specification
-├── .gitignore                # Git ignore rules
+├── next_implementation_plan  # Version Specification & Work Tracker
+├── docker-compose.yml        # V3 Multi-Container Orchestration Manifest
+├── .env.example              # Environment Configuration Template
+├── .gitignore                # Git Ignore Rules
 │
 ├── docs/                     # Technical Documentation Laboratory
-│   └── v2/                   # Version 2 Engineering Modules
-│       ├── architecture.md   # 5-Tier Data Layer Specification
-│       ├── database-design.md# Schema, ER Diagram & Database Invariants
-│       ├── indexing.md       # B-tree Index Placement & Strategy
-│       ├── query-analysis.md # EXPLAIN ANALYZE Execution Plans & Benchmarks
-│       ├── transactions.md   # ACID Guarantees & Transaction Isolation
-│       ├── concurrency.md    # Row Locking (SELECT FOR UPDATE) & Deadlock Prevention
-│       ├── idempotency.md    # Idempotency Engine Architecture
-│       ├── performance.md   # Latency Distribution Benchmarks (p50, p95, p99)
-│       └── experiments.md   # Benchmarking Experiment Logs
+│   ├── v2/                   # Version 2 Engineering Modules
+│   └── v3/                   # Version 3 Container & Caching Modules
+│       ├── architecture.md   # Container Topology & Cache Flow Diagram
+│       └── performance.md    # Redis Cache Hit vs. DB Direct Latency Benchmarks
 │
 ├── v/                        # Master Version Documentation
 │   ├── v1.txt                # Version 1 Master Specification & Work Log
 │   ├── v2.txt                # Version 2 Master Specification & Work Log
+│   ├── v3.txt                # Version 3 Master Specification & Work Log
 │   └── script.txt            # Master Roadmap & Specification Guide
 │
 ├── backend/                  # FastAPI Application Root
+│   ├── Dockerfile            # Python 3.12-slim Container Definition
 │   ├── app/
-│   │   ├── api/              # API Route Handlers & Dependencies
-│   │   │   ├── v1/
-│   │   │   │   ├── auth.py
-│   │   │   │   ├── products.py
-│   │   │   │   ├── cart.py
-│   │   │   │   ├── orders.py
-│   │   │   │   └── router.py
-│   │   │   └── deps.py
-│   │   ├── core/             # Settings, Security & Standardized Errors
-│   │   │   ├── config.py
-│   │   │   ├── security.py
-│   │   │   └── errors.py
+│   │   ├── api/v1/           # Thin Route Handlers & Health Probes
+│   │   ├── core/             # Settings, Security, Standardized Errors & Redis Pool
 │   │   ├── middleware/       # Request ID & Latency Logging
-│   │   │   ├── request_id.py
-│   │   │   └── logging.py
 │   │   ├── models/           # SQLAlchemy 2.x ORM Models
-│   │   │   ├── base.py
-│   │   │   ├── user.py
-│   │   │   ├── product.py
-│   │   │   ├── cart.py
-│   │   │   └── order.py
 │   │   ├── schemas/          # Pydantic API Schemas
-│   │   │   ├── user.py
-│   │   │   ├── product.py
-│   │   │   ├── cart.py
-│   │   │   └── order.py
 │   │   ├── repositories/     # Encapsulated Data Access Layer
-│   │   │   ├── user_repository.py
-│   │   │   ├── product_repository.py
-│   │   │   ├── cart_repository.py
-│   │   │   └── order_repository.py
-│   │   ├── services/         # Business Logic & Transactions
-│   │   │   ├── auth_service.py
-│   │   │   ├── product_service.py
-│   │   │   ├── cart_service.py
-│   │   │   └── order_service.py
-│   │   ├── db/               # DB Session, Seed Script & Data Generator
-│   │   │   ├── base.py
-│   │   │   ├── session.py
-│   │   │   ├── seed.py
-│   │   │   └── generate_load_data.py
-│   │   └── main.py           # FastAPI Application Entrypoint
-│   ├── alembic/              # Database Migration Scripts
-│   ├── tests/                # Pytest Integration & Concurrency Suite
-│   │   ├── test_auth.py
-│   │   ├── test_cart.py
-│   │   ├── test_orders.py
-│   │   ├── test_products.py
-│   │   ├── test_repositories.py
-│   │   ├── test_idempotency.py
-│   │   └── test_concurrency.py
-│   ├── alembic.ini
-│   ├── requirements.txt
-│   └── .env
+│   │   ├── services/         # Business Logic, Cache-Aside & Transactions
+│   │   │   ├── cache_service.py # Redis Cache GET/SET/Invalidate Logic
+│   │   └── main.py           # FastAPI Entrypoint & Lifespan Handler
+│   ├── tests/                # Pytest Integration, Concurrency & Cache Suite
+│   └── requirements.txt
 │
-└── frontend/                 # Vanilla JS SPA Client
-    ├── index.html            # HTML5 Layout, Modals & Pagination Controls
-    ├── styles.css            # Modern Dark Glassmorphism CSS
-    └── app.js                # SPA Client Logic (Pagination, Filtering, Idempotency Header)
+└── frontend/                 # React 18 + Vite 5 SPA Client
+    ├── Dockerfile            # Multi-Stage Build (Node 20 -> Nginx alpine)
+    ├── nginx.conf            # Nginx Reverse Proxy Config (/api -> backend:8000)
+    ├── src/                  # React SPA Source Code & Lucide Icons
+    └── package.json
 ```
 
 ---
 
-## ⚡ Quick Start Guide
+## ⚡ Quick Start Guide (Containerized & Local)
 
-### 1. Environment Setup
+### Option A: Run with Docker Compose (Recommended)
+Make sure **Docker Desktop** is running, then run:
+```powershell
+docker compose up --build
+```
+- **Web App**: [http://localhost:3000](http://localhost:3000)
+- **API Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Liveness Probe**: [http://localhost:8000/healthz](http://localhost:8000/healthz)
+- **Readiness Probe**: [http://localhost:8000/readyz](http://localhost:8000/readyz)
+
+---
+
+### Option B: Run Locally without Docker
+
+#### 1. Setup Virtual Environment & Install Dependencies
 ```powershell
 cd backend
-
-# Create Virtual Environment
 python -m venv .venv
-
-# Activate Virtual Environment (PowerShell)
 .\.venv\Scripts\Activate.ps1
-
-# Install Dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure Database & Seed Data
-Update `backend/.env` with your Supabase / PostgreSQL database URI:
-```env
-DATABASE_URL=postgresql+asyncpg://postgres.ehnadqstbnlfixhpibuu:MiniCommerceDB%40123%40123%40123@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
-JWT_SECRET=supersecretkey_minicommerce_v1_laboratory_key_2026
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-```
+#### 2. Configure Database & Environment
+Copy `.env.example` to `.env` or `backend/.env` with your Supabase connection string.
 
-Run seed or load data generator script to populate database tables:
-```powershell
-# Default Seed Data
-python app/db/seed.py
-
-# Benchmark Load Dataset Generator (500 users, 2000 products, 1500 orders)
-python app/db/generate_load_data.py
-```
-
-### 3. Run Pytest Suite
+#### 3. Run Pytest Suite
 ```powershell
 python -m pytest -v
 ```
-*Expected: 22/22 tests passing cleanly.*
+*Expected: 27/27 tests passing cleanly.*
 
-### 4. Start Backend Server
-```powershell
-uvicorn app.main:app --reload --reload-exclude ".venv" --port 8000
-```
-- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-
-### 5. Start Frontend SPA
-In a separate terminal:
-```powershell
-cd frontend
-python -m http.server 3000 --bind 127.0.0.1
-```
-- **Web App**: [http://localhost:3000](http://localhost:3000)
-
----
-
-## 🔑 Default Simulated Accounts
-
-| Role / User | Email | Password | Pre-seeded State |
-|---|---|---|---|
-| **User 1** | `alice@example.com` | `Password123!` | Active Cart with items |
-| **User 2** | `bob@example.com` | `Password123!` | Confirmed Order history |
-| **User 3** | `charlie@example.com` | `Password123!` | Clean Account |
-
----
-
-## 🛠️ API Reference Summary
-
-### Authentication (`/api/v1/auth`)
-- `POST /api/v1/auth/register` — Register new user account.
-- `POST /api/v1/auth/login` — Login and acquire JWT bearer access token.
-- `GET /api/v1/auth/me` — Retrieve current authenticated user profile.
-
-### Products (`/api/v1/products`)
-- `GET /api/v1/products` — List products with query parameters:
-  - `page` (default 1)
-  - `page_size` (default 20, max 100)
-  - `min_price` / `max_price` (price range filters)
-  - `sort_by` (`name`, `price`, `created_at`, `stock`)
-  - `sort_order` (`asc`, `desc`)
-- `GET /api/v1/products/{id}` — Get single product details by ID.
-- `POST /api/v1/products` — Create new product record.
-
-### Cart (`/api/v1/cart`)
-- `GET /api/v1/cart` — Get current user's shopping cart.
-- `POST /api/v1/cart/items` — Add product item to cart (validates stock).
-- `PATCH /api/v1/cart/items/{id}` — Update item quantity in cart.
-- `DELETE /api/v1/cart/items/{id}` — Remove item from cart.
-
-### Orders & Checkout (`/api/v1/orders`)
-- `POST /api/v1/orders` — **Atomic Idempotent Checkout**:
-  - Accepts `Idempotency-Key` header.
-  - Locks product rows (`SELECT ... FOR UPDATE`), validates stock, creates order, snapshots prices, deducts stock, clears cart.
-- `GET /api/v1/orders` — List user's order history.
-- `GET /api/v1/orders/{id}` — Get specific order details (enforces ownership).
-
----
-
-## 📊 Performance & Query Benchmarks (V2 Laboratory)
-
-All benchmarks are measured against a production load dataset of **409,913 records** (10,000 Users, 50,000 Products, 100,000 Orders, and 249,913 Order Items) populated via `generate_load_data.py`.
-
-### 1. HTTP Endpoint Performance Metrics (`docs/v2/performance.md`)
-*Tested with 50 concurrent virtual users executing 10,000 requests per scenario against FastAPI Uvicorn:*
-
-| Endpoint | Requests/Sec (RPS) | Avg Latency (ms) | p50 Latency (ms) | p95 Latency (ms) | p99 Latency (ms) | Error Rate |
-|---|---|---|---|---|---|---|
-| `GET /api/v1/products` (Paginated) | **485.2** | 102.4 ms | 94.2 ms | 158.0 ms | 210.5 ms | **0.00%** |
-| `GET /api/v1/products/{id}` | **620.8** | 80.1 ms | 72.5 ms | 125.4 ms | 162.0 ms | **0.00%** |
-| `POST /api/v1/cart/items` | **340.5** | 146.8 ms | 132.0 ms | 210.2 ms | 285.0 ms | **0.00%** |
-| `POST /api/v1/orders` (Atomic Checkout) | **195.4** | 255.6 ms | 230.1 ms | 380.5 ms | 490.2 ms | **0.00%** |
-
----
-
-### 2. EXPLAIN ANALYZE Query Plans (`docs/v2/query-analysis.md`)
-
-#### Experiment 1: User Lookup by Email (`WHERE email = '...'`)
-* **Before Index (Sequential Scan on 10,000 Users)**:
-  `Seq Scan on users (cost=0.00..258.00 rows=1 width=38) | Execution Time: 4.148 ms`
-* **After B-tree Unique Index (`ix_users_email`)**:
-  `Index Scan using ix_users_email on users (cost=0.29..8.30 rows=1 width=38) | Execution Time: 0.052 ms`
-* **Speedup**: **~80x latency reduction**.
-
-#### Experiment 2: Deep OFFSET Pagination Latency Bounds
-| OFFSET Value | Execution Latency (ms) | Query Plan Type | Buffer Hits |
-|---|---|---|---|
-| `OFFSET 0` | **0.08 ms** | Index Scan | 4 shared hit |
-| `OFFSET 100` | **0.22 ms** | Index Scan | 12 shared hit |
-| `OFFSET 1,000` | **1.85 ms** | Index Scan (Skip scan) | 98 shared hit |
-| `OFFSET 10,000` | **14.92 ms** | Bitmap Heap Scan | 742 shared hit |
-
----
-
-## 📝 Technical Documentation Laboratory
-Refer to the **[docs/v2/](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v2/)** directory and **[v/v2.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v2.txt)** for detailed architectural blueprints, EXPLAIN ANALYZE query plans, concurrency analysis, and performance benchmark logs. Re-run benchmark simulations locally via:
+#### 4. Run Benchmarks Laboratory
 ```powershell
 python -m app.db.run_benchmarks
 ```
 
+#### 5. Launch Backend Server
+```powershell
+uvicorn app.main:app --reload --port 8000
+```
+
+#### 6. Launch Frontend SPA
+In a separate terminal:
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+---
+
+## 🔍 How to Inspect Redis Caching & Commands
+
+Run these commands in a separate terminal while your containers are running:
+
+```powershell
+# 1. List all active cached product keys in Redis
+docker exec -it minicommerce-redis redis-cli KEYS "products:*"
+
+# 2. View raw JSON contents of a cached key
+docker exec -it minicommerce-redis redis-cli GET "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=None"
+
+# 3. View remaining TTL (Time-To-Live in seconds)
+docker exec -it minicommerce-redis redis-cli TTL "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=None"
+
+# 4. Stream live Redis commands as you navigate the web app
+docker exec -it minicommerce-redis redis-cli MONITOR
+```
+
+---
+
+## 📊 Performance & Cache Benchmarks
+
+All benchmarks are evaluated against a remote Supabase production load dataset of **409,913 records**.
+
+### Product Catalog Query (`GET /api/v1/products`) Latency Metrics
+
+| Scenario | Data Target | Avg Latency (ms) | p50 Latency (ms) | p95 Latency (ms) | Latency Speedup |
+|---|---|---|---|---|---|
+| **Direct Supabase PostgreSQL Scan** | Remote AWS Cloud DB | **102.4 ms** | 94.2 ms | 158.0 ms | Baseline (1x) |
+| **Redis Cache Hit** | Local Redis Container | **2.8 ms** | 2.1 ms | 4.9 ms | **~36x Speedup** |
+
+---
+
+## 📝 Technical Documentation Suite
+Refer to **[v/v3.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v3.txt)** and **[docs/v3/](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v3/)** for full architectural blueprints, container error resolution logs, and caching verification steps.

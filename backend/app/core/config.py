@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "supersecretkey_minicommerce_v1_laboratory_key_2026"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_TTL_SECONDS: int = 300
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),

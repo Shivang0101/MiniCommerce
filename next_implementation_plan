@@ -1,0 +1,47 @@
+### Task: Implement MiniCommerce V3 Specification
+
+We are evolving the **MiniCommerce** backend laboratory from V2 to **V3: Containerization, In-Memory Caching & Distributed State Resilience**.
+
+#### Current State (V2 Complete):
+* 5-tier architecture: Routers → Services → Repositories → SQLAlchemy 2.x AsyncSession → Remote Supabase PostgreSQL (409k records).
+* Concurrency control: `SELECT FOR UPDATE` with deterministic ID ordering and composite unique idempotency constraints.
+* Frontend: React 18 + Vite 5 SPA.
+
+---
+
+### V3 Constraints & Resource Optimization Guidelines:
+1. **Remote Database Strategy**: Do NOT run a local PostgreSQL container. Keep pointing the FastAPI container directly to the remote **Supabase PostgreSQL instance** to eliminate local disk consumption for database storage.
+2. **Minimal Base Images**:
+   - Backend: `python:3.12-slim`
+   - Redis: `redis:alpine` (or `redis:7-alpine`)
+   - Frontend: Multi-stage build (`node:20-alpine` for building assets, `nginx:alpine` for serving)
+3. **Build Cleanliness**: Ensure Dockerfiles avoid caching redundant pip/npm layers (`--no-cache-dir`, `--no-cache`) and include `.dockerignore` to keep image builds lean and compatible with `docker system prune`.
+
+---
+
+### Key Requirements for V3:
+
+1. **Local Container Orchestration (`docker-compose.yml`)**:
+   - Define lightweight services: `backend`, `redis`, and `frontend`.
+   - Configure container networking, environment variable forwarding (`DATABASE_URL` pointing to Supabase, `REDIS_URL=redis://redis:6379/0`), and health dependency rules.
+
+2. **Async Redis Caching Layer (`app/core/redis.py` & `app/services/cache_service.py`)**:
+   - Implement singleton connection pool management within FastAPI's lifespan handlers.
+   - Implement the **Cache-Aside pattern** for `GET /api/v1/products` queries with configurable TTLs and structured key naming (`products:page={p}:size={s}:cat={c}:search={q}`).
+   - Implement **Write Invalidation**: Invalidate matching product cache keys when stock changes or new orders are placed in `order_service.py`.
+
+3. **Fault-Tolerance & Cache Stampede Resilience**:
+   - Implement graceful degradation: If Redis is unreachable, down, or times out, the service layer must log a warning and fall back to querying Supabase PostgreSQL directly without throwing a 500 error to the client.
+
+4. **Health & Readiness Endpoints (`app/api/v1/health.py`)**:
+   - `/healthz`: Liveness check (verifies FastAPI process is alive).
+   - `/readyz`: Readiness check (actively verifies downstream connectivity to both Supabase PostgreSQL and Redis).
+
+5. **Automated Verification & Docs**:
+   - Tests covering cache hits, cache misses, invalidation triggers, and Redis connection fallback.
+   - Documentation in `docs/v3/` capturing latency comparisons (DB direct vs. Redis hit) and container topology.
+
+---
+
+### Output Needed:
+Provide the step-by-step implementation plan, Dockerfiles, `docker-compose.yml`, caching architecture code (`redis.py`, `cache_service.py`, updated `product_service.py`), health probes, and verification steps.

@@ -8,17 +8,22 @@ from app.core.errors import api_exception_handler
 from app.db.session import engine
 from app.db.base import Base
 
+from app.core.redis import init_redis_pool, close_redis_pool
+from app.api.v1.health import health_router
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure database schema exists on startup
+    # Initialize database schema and Redis pool on startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await init_redis_pool()
     yield
+    await close_redis_pool()
 
 app = FastAPI(
-    title="MiniCommerce V2 Laboratory",
-    description="Database Engineering, Concurrency & Performance Laboratory",
-    version="2.0.0",
+    title="MiniCommerce V3 Laboratory",
+    description="Containerization, In-Memory Caching & Distributed State Resilience Laboratory",
+    version="3.0.0",
     lifespan=lifespan
 )
 
@@ -38,9 +43,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API v1 Router
+# Include Health routes at root (/healthz, /readyz) as well as under /api/v1
+app.include_router(health_router)
 app.include_router(api_v1_router)
 
 @app.get("/")
 async def root():
-    return {"name": "MiniCommerce V2 Laboratory API", "version": "2.0.0", "status": "running", "docs": "/docs"}
+    return {"name": "MiniCommerce V3 Laboratory API", "version": "3.0.0", "status": "running", "docs": "/docs"}

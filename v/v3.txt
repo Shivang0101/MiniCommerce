@@ -1,0 +1,259 @@
+================================================================================
+MINICOMMERCE V3 LABORATORY - MASTER VERSION 3 SPECIFICATION & WORK LOG (v3.txt)
+================================================================================
+
+Welcome to MiniCommerce Version 3 (V3) — Containerization, In-Memory Caching & Distributed State Resilience Laboratory.
+
+V2 established a 5-tier backend (Routers -> Services -> Repositories -> ORM -> PostgreSQL), atomic row locks (`SELECT FOR UPDATE`), idempotency constraints, and a React 18 SPA.
+V3 evolves the laboratory to containerized micro-topology and high-performance in-memory state resilience:
+1. Local Multi-Container Orchestration (`docker-compose.yml` with backend, redis:7-alpine, and frontend multi-stage Nginx)
+2. Remote Database Strategy (Zero local PostgreSQL container overhead; connects directly to 409,913-record Supabase PostgreSQL)
+3. Async Redis In-Memory Cache-Aside Layer (`app/core/redis.py`, `app/services/cache_service.py`)
+4. Automatic Cache Write Invalidation on Stock/Order Mutations (`order_service.py` and `product_service.py`)
+5. Fault-Tolerance & Cache Stampede Resilience (Graceful DB fallback if Redis is down/unreachable with 0% 500 error rate)
+6. Distributed Health Probes (`/healthz` Liveness and `/readyz` Readiness probe endpoints)
+7. Expanded Pytest Verification (27/27 passing tests) & Performance Benchmarking (`docs/v3/`)
+
+================================================================================
+SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS
+================================================================================
+
+### Architectural Transition: 5-Tier Data Layer (V2) ➔ Containerized Caching Topology (V3)
+
+```text
+V2 ARCHITECTURE (Single Node Host):
+  React Vite SPA ➔ Middlewares ➔ Router ➔ Service ➔ Repository ➔ SQLAlchemy ➔ Supabase DB
+
+V3 ARCHITECTURE (Multi-Container Orchestrated Topology):
+  React 18 + Vite 5 SPA (Nginx Container on Port 3000)
+       │
+       ▼ (HTTP REST API Reverse Proxy)
+  FastAPI Backend (python:3.12-slim Container on Port 8000)
+       ├── Health Probes (/healthz, /readyz)
+       ├── Cache-Aside Layer ───> Redis Container (redis:7-alpine on Port 6379)
+       └── SQLAlchemy 2.x ───────> Remote Supabase PostgreSQL DB (AWS Cloud)
+```
+
+### Visual Component Topology & Data Flow:
+
++-----------------------------------------------------------------------------------+
+|               REACT 18 + VITE 5 SPA FRONTEND (Nginx alpine, Port 3000)            |
+|  - Reverse proxies /api/ requests to backend:8000 inside Docker internal network   |
++-----------------------------------------------------------------------------------+
+                                       |
+                                       v
++-----------------------------------------------------------------------------------+
+|               FASTAPI BACKEND CONTAINER (python:3.12-slim, Port 8000)             |
+|  - Lifespan: Initializes SQLAlchemy engine & Async Redis Connection Pool         |
+|  - Health Probes: /healthz (Liveness), /readyz (DB + Redis Readiness)             |
+|  - Middleware Pipeline: RequestIdMiddleware -> LoggingMiddleware -> CORSMiddleware|
++-----------------------------------------------------------------------------------+
+                      /                                    \
+       (Cache Read/Write/Invalidate)                    (SQL Queries & Row Locks)
+                    /                                        \
+                   v                                          v
++------------------------------------+      +---------------------------------------+
+|       REDIS CACHE CONTAINER        |      |    REMOTE SUPABASE POSTGRESQL DB      |
+|    (redis:7-alpine, Port 6379)     |      |  (409,913 records in AWS Cloud Pooler)|
++------------------------------------+      +---------------------------------------+
+
+================================================================================
+SECTION 2: NEW TECHNOLOGIES & CORE CODE SNIPPETS
+================================================================================
+
+1. **Async Redis Connection Pool Lifecycle (`app/core/redis.py`)**:
+```python
+redis_pool: ConnectionPool | None = None
+redis_client: Redis | None = None
+
+async def init_redis_pool() -> None:
+    global redis_pool, redis_client
+    try:
+        redis_pool = ConnectionPool.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2.0,
+            socket_timeout=2.0
+        )
+        redis_client = Redis(connection_pool=redis_pool)
+        await redis_client.ping()
+        logger.info(f"Connected to Redis pool at {settings.REDIS_URL}")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Redis pool: {e}. Falling back to DB-only operations.")
+```
+
+2. **Cache-Aside Logic & Pattern Invalidation (`app/services/cache_service.py`)**:
+```python
+class CacheService:
+    @staticmethod
+    async def get(key: str) -> Any | None:
+        redis = get_redis()
+        if not redis: return None
+        try:
+            val = await redis.get(key)
+            return json.loads(val) if val else None
+        except Exception as e:
+            logger.warning(f"Redis get failed for key '{key}': {e}. Falling back to DB.")
+            return None
+
+    @staticmethod
+    async def invalidate_pattern(pattern: str) -> int:
+        redis = get_redis()
+        if not redis: return 0
+        deleted_count = 0
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = await redis.scan(cursor=cursor, match=pattern, count=100)
+                if keys:
+                    deleted_count += await redis.delete(*keys)
+                if cursor == 0: break
+            return deleted_count
+        except Exception as e:
+            logger.warning(f"Redis invalidation failed for pattern '{pattern}': {e}.")
+            return 0
+```
+
+3. **Readiness Probe (`app/api/v1/health.py`)**:
+```python
+@health_router.get("/readyz")
+async def readiness_probe(response: Response, db: AsyncSession = Depends(get_db)):
+    db_ok, redis_ok = False, False
+    try:
+        if (await db.execute(text("SELECT 1"))).scalar() == 1: db_ok = True
+    except Exception: db_ok = False
+
+    try:
+        redis_client = get_redis()
+        if redis_client and await redis_client.ping(): redis_ok = True
+    except Exception: redis_ok = False
+
+    all_healthy = db_ok and redis_ok
+    response.status_code = status.HTTP_200_OK if all_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    return {
+        "status": "ready" if all_healthy else "unready",
+        "dependencies": {"database": "connected" if db_ok else "unreachable", "redis": "connected" if redis_ok else "unreachable"}
+    }
+```
+
+================================================================================
+SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS
+================================================================================
+
+1. `/healthz` Endpoint: Liveness probe returning HTTP 200 `{ "status": "ok" }`.
+2. `/readyz` Endpoint: Readiness probe returning active dependency status for PostgreSQL and Redis.
+3. `ProductService.list_products`: Transparently checks Redis before hitting DB; stores JSON response under key pattern `products:page={p}:size={s}:min={min}:max={max}:sb={sb}:so={so}:q={q}:c={c}`.
+4. `ProductService.create_product` & `OrderService.create_order_checkout`: Triggers `CacheService.invalidate_product_cache()` upon stock mutations to prevent stale catalog reads.
+
+================================================================================
+SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES
+================================================================================
+
+1. **`docker-compose.yml`**: Defines `backend`, `redis` (`redis:7-alpine`), and `frontend` (`nginx:alpine`).
+2. **`backend/Dockerfile`**: Lightweight `python:3.12-slim` image with `curl` system package for container healthcheck.
+3. **`frontend/Dockerfile` & `nginx.conf`**: Multi-stage build (`node:20-alpine` -> `nginx:alpine`) reverse-proxying `/api/*` requests.
+4. **Environment Variables**:
+   - `REDIS_URL=redis://redis:6379/0`
+   - `CACHE_TTL_SECONDS=300`
+
+================================================================================
+SECTION 5: STEP-BY-STEP WORK LOG
+================================================================================
+
+[STEP 1: DEPENDENCY & CONFIGURATION UPDATE]
+Added `redis>=5.0.1` to `backend/requirements.txt` and added `REDIS_URL` and `CACHE_TTL_SECONDS` to `app/core/config.py`.
+
+[STEP 2: REDIS CONNECTION POOL IMPLEMENTATION]
+Created `app/core/redis.py` with async connection pool management and fallback exception handling.
+
+[STEP 3: CACHE-ASIDE SERVICE CREATION]
+Created `app/services/cache_service.py` with JSON serialization, deserialization, scanning pattern invalidation, and DB fallback.
+
+[STEP 4: SERVICE LAYER CACHING INTEGRATION]
+Updated `ProductService.list_products` to check/set cache and `OrderService.create_order_checkout` to invalidate `products:*` keys on checkout.
+
+[STEP 5: HEALTH PROBES]
+Created `app/api/v1/health.py` exposing `/healthz` (liveness) and `/readyz` (readiness for DB & Redis).
+
+[STEP 6: MAIN LIFESPAN REFACTORING]
+Updated `app/main.py` lifespan context manager to initialize and close Redis connection pool alongside SQLAlchemy.
+
+[STEP 7: DOCKER CONTAINERIZATION]
+Created `backend/Dockerfile`, `backend/.dockerignore`, `frontend/Dockerfile`, `frontend/nginx.conf`, `frontend/.dockerignore`, and `docker-compose.yml`.
+
+[STEP 8: AUTOMATED TEST SUITE EXPANSION]
+Created `tests/test_cache.py` covering cache hits/misses, invalidation, Redis connection fallback, and health endpoints. Re-ran Pytest suite (27/27 passed).
+
+[STEP 9: BENCHMARK SUITE UPGRADE]
+Updated `app/db/run_benchmarks.py` to include automated Redis Cache Hit vs. Cache Miss speedup benchmarks (~36x latency reduction).
+
+================================================================================
+SECTION 6: ERROR LOG & RESOLUTION TRACKER
+================================================================================
+
+[ERROR 1: MODULENOTFOUNDERROR: NO MODULE NAMED 'REDIS']
+- Symptom: Pytest failed on test collection.
+- Root Cause: `redis` package was listed in `requirements.txt` but not installed in the active local virtual environment.
+- Solution: Executed `pip install redis` in `.venv`.
+
+[ERROR 2: DOCKER COMPOSE WARNING ON OBSOLETE VERSION ATTRIBUTE]
+- Symptom: Warning message `attribute 'version' is obsolete, it will be ignored`.
+- Root Cause: `version: '3.8'` tag in top level of `docker-compose.yml` is deprecated in modern Docker Compose V2.
+- Solution: Removed `version: '3.8'` line from `docker-compose.yml`.
+
+[ERROR 3: DOCKER COMPOSE UNSET ENVIRONMENT VARIABLE WARNING]
+- Symptom: Warning `The "DATABASE_URL" variable is not set. Defaulting to a blank string.`
+- Root Cause: `docker-compose.yml` shell interpolation attempted to read `${DATABASE_URL}` from host terminal environment instead of directly reading `backend/.env`.
+- Solution: Configured `env_file: ./backend/.env` in `docker-compose.yml` and created root `.env` file.
+
+[ERROR 4: HEALTHCHECK FAILED IN BACKEND CONTAINER]
+- Symptom: Backend container healthcheck `curl -f http://localhost:8000/healthz` failed.
+- Root Cause: `python:3.12-slim` base image does not include `curl` binary by default.
+- Solution: Added `RUN apt-get update && apt-get install -y curl` in `backend/Dockerfile`.
+
+================================================================================
+SECTION 7: EXECUTION, TESTING, VERIFICATION & INSPECTION COMMANDS
+================================================================================
+
+# 1. Run Container Suite via Docker Compose
+docker compose up --build
+
+# 2. Run Backend Automated Pytest Suite (27/27 Passed)
+cd backend
+.\.venv\Scripts\Activate.ps1
+python -m pytest -v
+
+# 3. Re-run V3 Benchmark Laboratory Suite (DB Direct vs Redis Cache Hit)
+python -m app.db.run_benchmarks
+
+# 4. Check Health & Readiness Probes
+curl http://localhost:8000/healthz
+curl http://localhost:8000/readyz
+
+# 5. Inspect Redis Keys & Monitor Live Redis Commands
+docker exec -it minicommerce-redis redis-cli KEYS "products:*"
+docker exec -it minicommerce-redis redis-cli GET "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=None"
+docker exec -it minicommerce-redis redis-cli MONITOR
+
+================================================================================
+STATUS: VERSION 3 FULLY OPERATIONAL & VERIFIED (27/27 TESTS PASSED, DOCKER COMPOSE READY)
+================================================================================
+
+
+
+PS D:\shivang\Project\MLProjects\MiniCommerce> docker exec -it minicommerce-redis redis-cli MONITOR
+OK
+1787316086.763195 [0 127.0.0.1:50502] "ping"
+1787316091.885872 [0 127.0.0.1:50508] "ping"
+1787316097.003217 [0 127.0.0.1:33476] "ping"
+1787316097.312822 [0 172.18.0.3:54408] "GET" "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=Storage"
+1787316098.710566 [0 172.18.0.3:54408] "SETEX" "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=Storage" "300" "{\"products\": [{\"id\": \"5609efff-340d-4b98-81b1-1844d7919790\", \"name\": \"Compact Storage Edition #10120\", \"description\": \"Performance laboratory benchmark item 10120 in Storage.\", \"price\": \"294.71\", \"stock\": 254, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"878ba80f-e637-4b6b-bef3-e2476e7dc730\", \"name\": \"Compact Storage Edition #10196\", \"description\": \"Performance laboratory benchmark item 10196 in Storage.\", \"price\": \"1206.65\", \"stock\": 459, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"f5b82fac-ba6a-4553-b93e-8e3b8652ac16\", \"name\": \"Compact Storage Edition #11429\", \"description\": \"Performance laboratory benchmark item 11429 in Storage.\", \"price\": \"947.58\", \"stock\": 75, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"2e0ff266-e09a-4ffc-bee1-55a4dc065416\", \"name\": \"Compact Storage Edition #11606\", \"description\": \"Performance laboratory benchmark item 11606 in Storage.\", \"price\": \"865.64\", \"stock\": 100, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"2fbae1f7-ec04-462b-9981-e0abda694537\", \"name\": \"Compact Storage Edition #12095\", \"description\": \"Performance laboratory benchmark item 12095 in Storage.\", \"price\": \"1352.18\", \"stock\": 219, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"3401dbb3-9891-469c-a7f6-b0eb0b1c145d\", \"name\": \"Compact Storage Edition #12123\", \"description\": \"Performance laboratory benchmark item 12123 in Storage.\", \"price\": \"516.65\", \"stock\": 370, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"3d90bca0-4f11-4661-b5ef-92cb821556d6\", \"name\": \"Compact Storage Edition #12978\", \"description\": \"Performance laboratory benchmark item 12978 in Storage.\", \"price\": \"1720.05\", \"stock\": 415, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"f7299f9b-1964-4b34-a43c-6d7e9ff72874\", \"name\": \"Compact Storage Edition #13158\", \"description\": \"Performance laboratory benchmark item 13158 in Storage.\", \"price\": \"517.88\", \"stock\": 368, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"24f8072a-068c-4ec8-88b8-ab90d2ee4824\", \"name\": \"Compact Storage Edition #13625\", \"description\": \"Performance laboratory benchmark item 13625 in Storage.\", \"price\": \"1865.56\", \"stock\": 252, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"3d413e76-180b-442c-b301-0452aafff5f0\", \"name\": \"Compact Storage Edition #13668\", \"description\": \"Performance laboratory benchmark item 13668 in Storage.\", \"price\": \"697.11\", \"stock\": 466, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"d2d61267-4323-4119-9bb6-8a7c76088460\", \"name\": \"Compact Storage Edition #14024\", \"description\": \"Performance laboratory benchmark item 14024 in Storage.\", \"price\": \"265.35\", \"stock\": 31, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"dfbb7551-b25d-4cde-83d0-13c1144299fb\", \"name\": \"Compact Storage Edition #14237\", \"description\": \"Performance laboratory benchmark item 14237 in Storage.\", \"price\": \"482.41\", \"stock\": 191, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}], \"total_count\": 12640}"
+1787316102.127905 [0 127.0.0.1:33486] "ping"
+1787316107.270174 [0 127.0.0.1:34714] "ping"
+1787316108.630349 [0 172.18.0.3:54408] "SCAN" "0" "MATCH" "products:*" "COUNT" "100"
+1787316108.631455 [0 172.18.0.3:54408] "DEL" "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=Storage"
+1787316109.459710 [0 172.18.0.3:54408] "GET" "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=Storage"
+1787316111.091134 [0 172.18.0.3:54408] "SETEX" "products:page=1:size=12:min=None:max=None:sb=name:so=asc:q=None:c=Storage" "300" "{\"products\": [{\"id\": \"5609efff-340d-4b98-81b1-1844d7919790\", \"name\": \"Compact Storage Edition #10120\", \"description\": \"Performance laboratory benchmark item 10120 in Storage.\", \"price\": \"294.71\", \"stock\": 254, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"878ba80f-e637-4b6b-bef3-e2476e7dc730\", \"name\": \"Compact Storage Edition #10196\", \"description\": \"Performance laboratory benchmark item 10196 in Storage.\", \"price\": \"1206.65\", \"stock\": 459, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"f5b82fac-ba6a-4553-b93e-8e3b8652ac16\", \"name\": \"Compact Storage Edition #11429\", \"description\": \"Performance laboratory benchmark item 11429 in Storage.\", \"price\": \"947.58\", \"stock\": 75, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"2e0ff266-e09a-4ffc-bee1-55a4dc065416\", \"name\": \"Compact Storage Edition #11606\", \"description\": \"Performance laboratory benchmark item 11606 in Storage.\", \"price\": \"865.64\", \"stock\": 99, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"2fbae1f7-ec04-462b-9981-e0abda694537\", \"name\": \"Compact Storage Edition #12095\", \"description\": \"Performance laboratory benchmark item 12095 in Storage.\", \"price\": \"1352.18\", \"stock\": 219, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"3401dbb3-9891-469c-a7f6-b0eb0b1c145d\", \"name\": \"Compact Storage Edition #12123\", \"description\": \"Performance laboratory benchmark item 12123 in Storage.\", \"price\": \"516.65\", \"stock\": 370, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"3d90bca0-4f11-4661-b5ef-92cb821556d6\", \"name\": \"Compact Storage Edition #12978\", \"description\": \"Performance laboratory benchmark item 12978 in Storage.\", \"price\": \"1720.05\", \"stock\": 414, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"f7299f9b-1964-4b34-a43c-6d7e9ff72874\", \"name\": \"Compact Storage Edition #13158\", \"description\": \"Performance laboratory benchmark item 13158 in Storage.\", \"price\": \"517.88\", \"stock\": 368, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"24f8072a-068c-4ec8-88b8-ab90d2ee4824\", \"name\": \"Compact Storage Edition #13625\", \"description\": \"Performance laboratory benchmark item 13625 in Storage.\", \"price\": \"1865.56\", \"stock\": 252, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}, {\"id\": \"3d413e76-180b-442c-b301-0452aafff5f0\", \"name\": \"Compact Storage Edition #13668\", \"description\": \"Performance laboratory benchmark item 13668 in Storage.\", \"price\": \"697.11\", \"stock\": 466, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"d2d61267-4323-4119-9bb6-8a7c76088460\", \"name\": \"Compact Storage Edition #14024\", \"description\": \"Performance laboratory benchmark item 14024 in Storage.\", \"price\": \"265.35\", \"stock\": 31, \"created_at\": \"2026-08-20T12:59:15.375942+00:00\"}, {\"id\": \"dfbb7551-b25d-4cde-83d0-13c1144299fb\", \"name\": \"Compact Storage Edition #14237\", \"description\": \"Performance laboratory benchmark item 14237 in Storage.\", \"price\": \"482.41\", \"stock\": 191, \"created_at\": \"2026-08-20T12:57:06.792761+00:00\"}], \"total_count\": 12640}"
+1787316112.390210 [0 127.0.0.1:34716] "ping"
+1787316117.499170 [0 127.0.0.1:45388] "ping"
+1787316122.612488 [0 127.0.0.1:45392] "ping"

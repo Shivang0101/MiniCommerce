@@ -173,9 +173,54 @@ async def run_http_endpoint_benchmarks(concurrency: int = 50, total_requests: in
             else:
                 print(f"{name:<40} | FAILED (All requests returned errors)")
 
+async def run_redis_cache_benchmarks(num_requests: int = 50):
+    """Recreates the Redis Cache-Aside latency benchmarks documented in docs/v3/performance.md."""
+    print("\n" + "=" * 80)
+    print("3. RUNNING REDIS CACHE-ASIDE LATENCY BENCHMARKS (docs/v3/performance.md)")
+    print("=" * 80)
+
+    from app.core.redis import init_redis_pool, close_redis_pool
+    from app.services.cache_service import CacheService
+
+    await init_redis_pool()
+
+    test_cache_key = "products:page=1:size=20:min=None:max=None:sb=name:so=asc:q=None:c=All"
+
+    # Step 1: Force cache purge (Cache Miss baseline)
+    await CacheService.invalidate_pattern("products:*")
+
+    # Step 2: Measure Cache Miss Latency
+    async with AsyncSessionLocal() as session:
+        t0 = time.perf_counter()
+        from app.services.product_service import ProductService
+        products_miss, total_count = await ProductService.list_products(session, page=1, page_size=20)
+        miss_latency_ms = (time.perf_counter() - t0) * 1000
+
+    print(f"  Cache MISS (Supabase DB Query + Cache Set) -> Latency: {miss_latency_ms:.2f} ms | Returned: {len(products_miss)} items")
+
+    # Step 3: Measure Repeated Cache Hit Latencies
+    hit_latencies = []
+    async with AsyncSessionLocal() as session:
+        for _ in range(num_requests):
+            t0 = time.perf_counter()
+            products_hit, _ = await ProductService.list_products(session, page=1, page_size=20)
+            hit_latencies.append((time.perf_counter() - t0) * 1000)
+
+    avg_hit = statistics.mean(hit_latencies)
+    hit_latencies.sort()
+    p50_hit = hit_latencies[int(len(hit_latencies) * 0.50)]
+    p95_hit = hit_latencies[int(len(hit_latencies) * 0.95)]
+    speedup = miss_latency_ms / avg_hit if avg_hit > 0 else 0
+
+    print(f"  Cache HIT  (Redis In-Memory Lookup, n={num_requests}) -> Avg: {avg_hit:.2f} ms | p50: {p50_hit:.2f} ms | p95: {p95_hit:.2f} ms")
+    print(f"  [RESULT] Cache Hit Speedup: {speedup:.1f}x faster than database scan!")
+
+    await close_redis_pool()
+
 async def main():
     await run_query_analysis_benchmarks()
     await run_http_endpoint_benchmarks(concurrency=20, total_requests=100)
+    await run_redis_cache_benchmarks(num_requests=50)
 
 if __name__ == "__main__":
     asyncio.run(main())
