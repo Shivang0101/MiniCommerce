@@ -65,7 +65,8 @@ class ProductService:
                 "description": p.description,
                 "price": str(p.price),
                 "stock": p.stock,
-                "created_at": p.created_at.isoformat() if p.created_at else None
+                "created_at": p.created_at.isoformat() if getattr(p, "created_at", None) else None,
+                "updated_at": p.updated_at.isoformat() if getattr(p, "updated_at", None) else None,
             }
             for p in products
         ]

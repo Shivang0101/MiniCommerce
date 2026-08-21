@@ -13,9 +13,15 @@ class UserLogin(BaseModel):
 class UserResponse(BaseModel):
     id: uuid.UUID
     email: str
+    is_admin: bool = False
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class AdminUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    is_admin: bool = True
 
 class Token(BaseModel):
     access_token: str

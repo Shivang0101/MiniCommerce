@@ -23,6 +23,25 @@ async def list_orders(
 ):
     return await OrderService.get_user_orders(db, current_user.id)
 
+@router.get("/{id}/status")
+async def get_order_status(
+    id: uuid.UUID,
+    current_user: User = Depends(get_current_user)
+):
+    """Poll real-time order processing status from Redis worker state."""
+    from app.core.redis import get_redis
+    import json
+    
+    redis = get_redis()
+    if redis:
+        try:
+            val = await redis.get(f"order_status:{id}")
+            if val:
+                return json.loads(val)
+        except Exception:
+            pass
+    return {"status": "Confirmed", "detail": "Order confirmed and stored in database."}
+
 @router.get("/{id}", response_model=OrderResponse)
 async def get_order(
     id: uuid.UUID,

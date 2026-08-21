@@ -48,7 +48,20 @@ export async function apiRequest(endpoint, method = "GET", body = null, requireA
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
 
-  // Read X-Total-Count header if present
+  // Parse Rate Limit Headers
+  const limit = response.headers.get("X-RateLimit-Limit");
+  const remaining = response.headers.get("X-RateLimit-Remaining");
+  const retryAfter = response.headers.get("Retry-After") || "14";
+
+  if (remaining !== null) {
+    window.dispatchEvent(new CustomEvent("ratelimit-update", { detail: { limit, remaining } }));
+  }
+
+  if (response.status === 429) {
+    window.dispatchEvent(new CustomEvent("ratelimit-exceeded", { detail: { retryAfter: parseInt(retryAfter, 10) } }));
+    throw new Error(`Rate limit exceeded. Please retry in ${retryAfter} seconds.`);
+  }
+
   const totalCountHeader = response.headers.get("X-Total-Count");
   const totalCount = totalCountHeader ? parseInt(totalCountHeader, 10) : null;
 

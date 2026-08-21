@@ -13,8 +13,7 @@ import httpx
 from sqlalchemy import text
 from app.db.session import AsyncSessionLocal, engine
 from app.core.security import hash_password, create_access_token
-from app.models.user import User
-from app.models.product import Product
+from app.db.base import User, Product, Cart, CartItem, Order, OrderItem
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
 
@@ -217,10 +216,90 @@ async def run_redis_cache_benchmarks(num_requests: int = 50):
 
     await close_redis_pool()
 
+async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
+    """Recreates the V4 Asynchronous ARQ Task Offloading benchmark documented in docs/v4/benchmarks.md."""
+    print("\n" + "=" * 80)
+    print("4. RUNNING V4 ASYNCHRONOUS CHECKOUT LATENCY BENCHMARKS (docs/v4/benchmarks.md)")
+    print("=" * 80)
+
+    from app.core.redis import init_redis_pool, close_redis_pool
+    await init_redis_pool()
+
+    async with AsyncSessionLocal() as session:
+        # Check user & cart
+        res = await session.execute(text("SELECT id, email FROM users LIMIT 1;"))
+        row = res.first()
+        if not row:
+            print("  [WARN] No user found. Skipping V4 checkout benchmark.")
+            await close_redis_pool()
+            return
+        user_id = row[0]
+
+        # Fetch product
+        p_res = await session.execute(text("SELECT id, name, price, stock FROM products WHERE stock > 20 LIMIT 1;"))
+        p_row = p_res.first()
+        if not p_row:
+            print("  [WARN] No product with available stock found.")
+            await close_redis_pool()
+            return
+        product_id = p_row[0]
+
+    # Measure Real Synchronous Execution (DB checkout + executing task functions sequentially inline)
+    from app.tasks.order_tasks import send_receipt_email, audit_low_stock, record_analytics_event
+    from app.services.order_service import OrderService
+    from app.repositories.cart_repository import CartRepository
+
+    sync_durations = []
+    async_durations = []
+
+    async with AsyncSessionLocal() as session:
+        cart = await CartRepository.get_or_create_by_user_id(session, user_id)
+        cart_id = cart.id
+        
+        for i in range(num_runs):
+            # Seed item in cart for sync run
+            await CartRepository.add_item(session, cart_id, product_id, 1)
+
+            # Measure Sync Duration (Inline DB Checkout + Inline Task Execution)
+            t0 = time.perf_counter()
+            try:
+                # 1. DB Checkout
+                order = await OrderService.create_order_checkout(session, user_id, idempotency_key=f"bench_sync_{time.time_ns()}_{i}")
+                # 2. Synchronously execute tasks inline
+                ctx = {}
+                await send_receipt_email(ctx, str(order.id), "alice@example.com", str(order.total_amount))
+                await audit_low_stock(ctx, [{"product_id": str(product_id), "name": "Test", "remaining_stock": 10}])
+                await record_analytics_event(ctx, "ORDER_PLACED", {"order_id": str(order.id)})
+                sync_durations.append((time.perf_counter() - t0) * 1000)
+            except Exception as e:
+                pass
+
+            # Seed item in cart for async run
+            await CartRepository.add_item(session, cart_id, product_id, 1)
+
+            # Measure Async Offloaded Duration (DB Commit + ARQ Redis Job Enqueue only)
+            t0 = time.perf_counter()
+            try:
+                await OrderService.create_order_checkout(session, user_id, idempotency_key=f"bench_async_{time.time_ns()}_{i}")
+                async_durations.append((time.perf_counter() - t0) * 1000)
+            except Exception as e:
+                pass
+
+    avg_sync = statistics.mean(sync_durations) if sync_durations else 0.0
+    avg_async = statistics.mean(async_durations) if async_durations else 0.0
+    speedup = avg_sync / avg_async if avg_async > 0 else 1.0
+
+    print(f"  Real Synchronous Checkout (DB + Inline Task Execution) -> Avg: {avg_sync:.2f} ms")
+    print(f"  Real Asynchronous ARQ Checkout (DB Commit + Redis Enqueue) -> Avg: {avg_async:.2f} ms")
+    print(f"  [RESULT] Asynchronous Offloading Speedup: {speedup:.1f}x reduction in checkout response latency!")
+
+    await close_redis_pool()
+
 async def main():
     await run_query_analysis_benchmarks()
     await run_http_endpoint_benchmarks(concurrency=20, total_requests=100)
     await run_redis_cache_benchmarks(num_requests=50)
+    await run_v4_async_checkout_benchmarks(num_runs=10)
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -21,7 +21,7 @@ class ProductResponse(BaseModel):
     description: str | None = None
     price: Decimal
     stock: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

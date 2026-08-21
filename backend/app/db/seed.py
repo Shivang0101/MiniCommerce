@@ -12,9 +12,10 @@ from app.db.base import Base, User, Product, Cart, CartItem, Order, OrderItem
 from app.core.security import hash_password
 
 SEED_USERS = [
-    {"email": "alice@example.com", "password": "Password123!"},
-    {"email": "bob@example.com", "password": "Password123!"},
-    {"email": "charlie@example.com", "password": "Password123!"},
+    {"email": "admin@minicommerce.com", "password": "Admin@123456", "is_admin": True},
+    {"email": "alice@example.com", "password": "Password123!", "is_admin": False},
+    {"email": "bob@example.com", "password": "Password123!", "is_admin": False},
+    {"email": "charlie@example.com", "password": "Password123!", "is_admin": False},
 ]
 
 SEED_PRODUCTS = [
@@ -44,11 +45,17 @@ async def seed_data():
             if not user:
                 user = User(
                     email=user_data["email"],
-                    password_hash=hash_password(user_data["password"])
+                    password_hash=hash_password(user_data["password"]),
+                    is_admin=user_data.get("is_admin", False)
                 )
                 session.add(user)
                 await session.flush()
                 print(f"Created user: {user_data['email']}")
+            else:
+                user.is_admin = user_data.get("is_admin", False)
+                user.password_hash = hash_password(user_data["password"])
+                await session.flush()
+                print(f"Updated existing user: {user_data['email']} (is_admin={user.is_admin})")
             user_map[user_data["email"]] = user
 
         # Seed Products

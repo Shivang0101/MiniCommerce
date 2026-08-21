@@ -1,0 +1,238 @@
+================================================================================
+MINICOMMERCE V4 LABORATORY - MASTER VERSION 4 SPECIFICATION & WORK LOG
+================================================================================
+
+[SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS]
+--------------------------------------------------------------------------------
+Version 4 evolves the MiniCommerce platform to support Asynchronous Background Task
+Processing (ARQ + Redis), Redis-backed Sliding-Window Rate Limiting Middleware,
+Customer Storefront Real-Time Decoupling Features, and a Secured Admin Observability
+Dashboard featuring an OpenTelemetry-Style Waterfall Distributed Trace Visualizer.
+
+Architectural Overview:
+1. HTTP Checkout Requests are strictly focused on atomic PostgreSQL transactions
+   (SELECT FOR UPDATE, stock deduction, order insertion, cart clearing, db.commit()).
+2. All non-critical side effects (receipt generation, low-stock threshold audits,
+   analytics metrics) are offloaded to an async ARQ background worker pool post-commit.
+3. API endpoints are protected by Redis Sorted Set sliding-window rate limiting.
+4. Admin routes (/api/v1/admin/* and /admin UI) are secured via JWT admin roles.
+
+ASCII Data Flow Diagram:
++-------------------------------------------------------------------------------+
+|                            MINICOMMERCE V4 ARCHITECTURE                        |
++-------------------------------------------------------------------------------+
+
+[ Client Browser (React SPA) ]
+       │
+       │ HTTP Request (with Sliding-Window Rate Limit Check)
+       ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+| FastAPI Backend Service (port 8000)                                           |
+|  ├── RateLimiterMiddleware (ZADD, ZCARD, ZREMRANGEBYSCORE on Redis)           |
+|  ├── OrderService.create_order_checkout (Atomic DB Transaction)               |
+|  └── TraceService (Records OpenTelemetry-style Spans)                         |
+└───────────────────────┬───────────────────────────────┬───────────────────────┘
+                        │                               │
+        DB Lock & Write │                               │ Post-Commit Task Enqueue
+                        ▼                               ▼
+┌──────────────────────────────┐              ┌─────────────────────────────────┐
+| Remote Supabase PostgreSQL   |              | Redis (In-Memory Datastore)     |
+| (Users, Orders, Products)    |              |  ├── ARQ Task Queue (arq:queue) |
+└──────────────────────────────┘              |  ├── Rate Limit Counters        |
+                                              |  ├── Order Statuses & Traces    |
+                                              └────────────────┬────────────────┘
+                                                               │
+                                                 Pulls Jobs    │
+                                                               ▼
+                                              ┌─────────────────────────────────┐
+                                              | ARQ Background Worker Service   |
+                                              |  ├── send_receipt_email         |
+                                              |  ├── audit_low_stock            |
+                                              |  └── record_analytics_event     |
+                                              └─────────────────────────────────┘
+
+Mermaid Workflow Diagram:
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant API as FastAPI Backend
+    participant Redis as Redis (Cache & ARQ)
+    participant DB as PostgreSQL (Supabase)
+    participant Worker as ARQ Background Worker
+
+    Client->>API: POST /api/v1/orders (Atomic Checkout)
+    API->>Redis: Check Sliding-Window Rate Limit
+    Redis-->>API: Limit OK (Remaining Quota)
+    API->>DB: SELECT FOR UPDATE (Lock Products)
+    API->>DB: INSERT Order & Deduct Stock (Commit)
+    API->>Redis: Enqueue ARQ Jobs (email, stock_audit)
+    API-->>Client: 201 Created (Order Status: Confirmed)
+    Worker->>Redis: Pop Job from arq:queue
+    Worker->>Worker: Execute send_receipt_email & audit_low_stock
+    Worker->>Redis: Update order_status:{id} -> "Receipt Emailed"
+    Client->>API: GET /api/v1/orders/{id}/status (Poll Status)
+    API-->>Client: {"status": "Receipt Emailed"}
+```
+
+================================================================================
+[SECTION 2: NEW TECHNOLOGIES & CORE CODE SNIPPETS]
+================================================================================
+
+1. ARQ Asynchronous Queue Integration (`app/worker.py`):
+```python
+from arq.connections import RedisSettings
+from app.core.config import settings
+from app.tasks.order_tasks import send_receipt_email, audit_low_stock, record_analytics_event
+
+class WorkerSettings:
+    functions = [send_receipt_email, audit_low_stock, record_analytics_event]
+    redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
+    max_tries = settings.TASK_MAX_RETRIES
+```
+
+2. Redis Sliding-Window Rate Limiting Middleware (`app/middleware/rate_limiter.py`):
+```python
+window_seconds = 60
+now = time.time()
+clear_before = now - window_seconds
+key = f"rate_limit:{client_id}:{tier_name}"
+
+pipe = redis.pipeline()
+pipe.zremrangebyscore(key, 0, clear_before)
+pipe.zadd(key, {f"{now}": now})
+pipe.zcard(key)
+pipe.expire(key, window_seconds + 5)
+results = await pipe.execute()
+```
+
+3. Post-Commit Task Offloading (`app/services/order_service.py`):
+```python
+await db.commit()
+arq_pool = get_arq_pool()
+if arq_pool:
+    await arq_pool.enqueue_job("send_receipt_email", str(order.id), user_email, str(total_amount), _job_id=f"email_{order.id}")
+    await arq_pool.enqueue_job("audit_low_stock", product_audit_list, _job_id=f"stock_{order.id}")
+```
+
+================================================================================
+[SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS]
+================================================================================
+
+Endpoints Introduced / Updated in V4:
+- `GET /api/v1/orders/{id}/status` -> Poll real-time async order processing state.
+- `GET /api/v1/admin/metrics` -> Admin observability metrics (active users, p95 latency, ARQ queue stats, cache hit %).
+- `GET /api/v1/admin/queue-health` -> ARQ worker execution logs and queue status.
+- `GET /api/v1/admin/live-logs` -> Recent 50 API transaction audit logs.
+- `GET /api/v1/admin/traces` -> OpenTelemetry-style waterfall traces.
+- `POST /api/v1/admin/users` -> Create or promote admin users (Secured by get_current_admin_user).
+
+Customer Storefront UI Upgrades (Amazon / BestBuy Style):
+- `HeroBanner.jsx` promotional deal carousel with tech sale banners ("Tech Deals Week — Up to 40% Off") and shipping highlights.
+- `Navbar.jsx` header with "Deliver to New York 10001" location selector, search bar with auto-clear, Rate Quota meter, Admin Panel toggle, Notification Inbox bell, and Cart count badge.
+- `ProductCard.jsx` redesigned with category-specific icon visual boxes, star ratings (`★★★★½ 4.8 (248)`), MSRP strikethrough & discount percentage tags (`$120.00` ~~$149.99~~ `18% OFF`), Express shipping badges ("FREE One-Day Delivery"), and stock status pills.
+- Notification Inbox Bell dropdown for receipt and stock alerts.
+- Live Cooldown Countdown Modal on HTTP 429 Rate Limit exceeded.
+- Order Status Timeline Pill during checkout (`Processing` ➔ `Confirmed` ➔ `Receipt Emailed`).
+
+Enterprise Admin Observability Control Center (Datadog / Grafana Style):
+- Global System Operational Status Bar showing live connectivity & response latencies for PostgreSQL, Redis 7, ARQ Worker Queue, and Rate Limiter.
+- Top 4 KPI Metrics Grid (Active 15m Users, p95 API Response Latency, ARQ Tasks Completed/In-Flight, Cache Hit %).
+- OpenTelemetry Distributed Waterfall Trace Visualizer featuring multi-span timeline hierarchy tree, span search bar, status badges, and span duration percentage bars.
+- ARQ Worker Task Execution Log stream with job status badges (`COMPLETED`, `RETRY`, `FAILED`) and execution duration metrics.
+- API Transaction Stream (Audit Trail) logging method, path, response code badges (`200 OK`, `201 Created`), and latency in milliseconds.
+- Secured Admin Role Grant Drawer (`POST /api/v1/admin/users`) with role creation and promotion capabilities.
+
+================================================================================
+[SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES]
+================================================================================
+
+Environment Variables (`.env` & `app/core/config.py`):
+- `ARQ_QUEUE_NAME` = "arq:queue"
+- `TASK_MAX_RETRIES` = 3
+- `RATE_LIMIT_DEFAULT` = 60
+- `RATE_LIMIT_AUTH` = 10
+- `RATE_LIMIT_ADMIN` = 120
+- `DEFAULT_ADMIN_EMAIL` = "admin@minicommerce.com"
+- `DEFAULT_ADMIN_PASSWORD` = "Admin@123456"
+
+Docker Compose (`docker-compose.yml`):
+- Added `minicommerce-worker` service executing `arq app.worker.WorkerSettings`.
+
+================================================================================
+[SECTION 5: STEP-BY-STEP WORK LOG]
+================================================================================
+
+1. Installed `arq` dependency in virtual environment (`.venv`).
+2. Updated `app/core/config.py` with ARQ, Rate Limiter, and Admin credentials.
+3. Added `is_admin` boolean flag to `User` model, updated schemas, and seeded default admin user.
+4. Created `app/core/redis.py` ARQ pool connections and fallback getters.
+5. Created `app/worker.py` and `app/tasks/order_tasks.py` job handlers.
+6. Refactored `OrderService.create_order_checkout` for post-commit ARQ job enqueuing and OpenTelemetry trace capture.
+7. Built `RateLimiterMiddleware` implementing Redis Sliding-Window rate limiting.
+8. Created `app/api/v1/admin.py` with secure admin metrics, live logs, waterfall traces, and admin user management.
+9. Upgraded React SPA with Notification Inbox, RateLimitModal, low stock badges, Order Status Pill, and Admin Observability Dashboard.
+10. Expanded Pytest suite (`test_tasks.py`, `test_rate_limiter.py`, `test_admin.py`).
+11. Updated `run_benchmarks.py`, `README.md`, and generated `v/v4.txt`.
+
+================================================================================
+[SECTION 6: ERROR LOG & RESOLUTION TRACKER]
+================================================================================
+
+1. Error: ResponseValidationError on `updated_at` field in `ProductResponse`
+   Symptom: HTTP 500 Internal Server Error on `GET /api/v1/products` catalog requests.
+   Root Cause: `ProductResponse` defined `updated_at: datetime` as required/non-nullable, but Supabase PostgreSQL catalog records contained `null` values for `updated_at`.
+   Solution: Updated `app/schemas/product.py` to set `created_at: datetime | None = None` and `updated_at: datetime | None = None`. Updated Redis catalog serialization in `app/services/product_service.py`.
+
+2. Error: UndefinedColumnError: column users.is_admin does not exist
+   Symptom: HTTP 500 Internal Server Error during `/auth/login` and `/auth/register`.
+   Root Cause: `Base.metadata.create_all` creates missing tables but does NOT add new columns to existing PostgreSQL tables created in V1-V3.
+   Solution: Executed `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;` in migration script `app/db/migrate_idempotency.py` and added automatic column migration execution to FastAPI's `lifespan` handler in `app/main.py`.
+
+3. Error: Admin Observability Gate remains locked for pre-existing Admin accounts
+   Symptom: Logging in as `admin@minicommerce.com` returned `is_admin: false`, preventing access to the Admin Dashboard.
+   Root Cause: Pre-existing user rows created prior to V4 received `is_admin = FALSE` when the column was added. `seed.py` skipped existing user records without updating properties.
+   Solution: Executed `UPDATE users SET is_admin = TRUE WHERE email = 'admin@minicommerce.com';` via `app/db/promote_admin.py` and updated `app/db/seed.py` to refresh `is_admin` flags for existing seed users.
+
+4. Error: `AdminDashboard.jsx` login form re-renders post-login
+   Symptom: Clicking "Authenticate as Admin" in UI authenticated backend session, but view did not unlock Admin Dashboard.
+   Root Cause: `/auth/login` returns `{ access_token: "..." }` without a nested user object, leaving `res.data.user` as `undefined` until `/auth/me` is called.
+   Solution: Updated `handleAdminLogin` in `AdminDashboard.jsx` to execute `GET /auth/me` after `/auth/login` and store full `userProfile`. Added automatic token validation on component mount.
+
+5. Error: Benchmark script `run_benchmarks.py` using simulated `time.sleep()` calls
+   Symptom: V4 async checkout benchmark baseline relied on hardcoded `time.sleep()` delays.
+   Root Cause: Baseline comparison needed a synchronous model representation after `OrderService` was refactored for ARQ async.
+   Solution: Refactored `run_v4_async_checkout_benchmarks` to run real task functions inline vs ARQ Redis job enqueuing for 100% empirical zero-sleep execution measurements.
+
+6. Error: Docker Container static asset caching & hot reloading delay
+   Symptom: Backend code edits did not reflect in running container, and Nginx served cached compiled Vite JS bundles.
+   Root Cause: Missing volume mounts for `./backend` in `docker-compose.yml`, and Nginx serving compiled static assets from Docker build stage.
+   Solution: Added `volumes: - ./backend:/app` in `docker-compose.yml` for instant backend hot-reloading and documented `docker-compose up --build` for frontend asset compilation.
+
+7. Error: Vite Dev Proxy `ECONNREFUSED 127.0.0.1:8000` on initial launch
+   Symptom: Vite terminal outputs `[vite] http proxy error: /api/v1/admin/metrics Error: connect ECONNREFUSED 127.0.0.1:8000`.
+   Root Cause: Vite dev server initializes in ~1.6s and immediately starts polling backend telemetry endpoints before Uvicorn completes its database lifespan initialization on port 8000.
+   Solution: Once Uvicorn finishes binding to port 8000 (after ~2s), all proxy requests succeed automatically. For production, Docker Compose handles startup ordering via container healthchecks.
+
+================================================================================
+[SECTION 7: EXECUTION, TESTING & VERIFICATION COMMANDS]
+================================================================================
+
+1. Seed Database with Default Admin & Initial Catalog:
+   .\.venv\Scripts\python -m app.db.seed
+
+2. Launch ARQ Background Worker locally:
+   .\.venv\Scripts\arq app.worker.WorkerSettings
+
+3. Run Full Automated Pytest Suite:
+   .\.venv\Scripts\python -m pytest
+
+4. Run V4 Latency & Throughput Benchmark Comparison:
+   .\.venv\Scripts\python app/db/run_benchmarks.py
+
+5. Launch Multi-Container Orchestration (Redis, Backend, Worker, Frontend):
+   docker-compose up --build
+
+================================================================================
+END OF SPECIFICATION
+================================================================================

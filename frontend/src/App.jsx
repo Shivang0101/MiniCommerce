@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
+import HeroBanner from './components/HeroBanner';
 import CategoryBar from './components/CategoryBar';
 import ControlBar from './components/ControlBar';
 import ProductGrid from './components/ProductGrid';
@@ -7,6 +8,8 @@ import Pagination from './components/Pagination';
 import CartDrawer from './components/CartDrawer';
 import AuthModal from './components/AuthModal';
 import ProfileModal from './components/ProfileModal';
+import AdminDashboard from './components/AdminDashboard';
+import RateLimitModal from './components/RateLimitModal';
 import Toast from './components/Toast';
 import { apiRequest, getUser, getToken, clearAuth, setAuth } from './api';
 
@@ -36,13 +39,29 @@ export default function App() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [addingId, setAddingId] = useState(null);
 
+  // Admin View & Rate Limit State
+  const [isAdminView, setIsAdminView] = useState(false);
+  const [isRateLimitOpen, setIsRateLimitOpen] = useState(false);
+  const [rateLimitCooldown, setRateLimitCooldown] = useState(14);
+
   // Toast State
   const [toast, setToast] = useState(null);
 
-  // Show Toast helper
   const showToast = (type, title, message, orderId = null) => {
     setToast({ type, title, message, orderId });
   };
+
+  // Rate limit event listener
+  useEffect(() => {
+    const handleExceeded = (e) => {
+      if (e.detail?.retryAfter) {
+        setRateLimitCooldown(e.detail.retryAfter);
+      }
+      setIsRateLimitOpen(true);
+    };
+    window.addEventListener("ratelimit-exceeded", handleExceeded);
+    return () => window.removeEventListener("ratelimit-exceeded", handleExceeded);
+  }, []);
 
   // Fetch Products from Backend API
   const fetchProducts = useCallback(async () => {
@@ -60,7 +79,6 @@ export default function App() {
       setProducts(data || []);
       if (count !== null) setTotalCount(count);
 
-      // Build product map cache
       setProductsMap((prev) => {
         const next = { ...prev };
         (data || []).forEach((p) => { next[p.id] = p; });
@@ -68,7 +86,9 @@ export default function App() {
       });
 
     } catch (err) {
-      showToast('error', 'Failed to Load Catalog', err.message);
+      if (!err.message.includes("Rate limit")) {
+        showToast('error', 'Failed to Load Catalog', err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -85,7 +105,6 @@ export default function App() {
     }
   }, []);
 
-  // Sync user profile on mount if token exists but user object missing
   useEffect(() => {
     const token = getToken();
     const existingUser = getUser();
@@ -102,13 +121,14 @@ export default function App() {
     }
   }, []);
 
-  // Initial Load & Query Debounce
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchProducts();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [fetchProducts]);
+    if (!isAdminView) {
+      const timer = setTimeout(() => {
+        fetchProducts();
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, [fetchProducts, isAdminView]);
 
   useEffect(() => {
     if (user || getToken()) {
@@ -116,7 +136,6 @@ export default function App() {
     }
   }, [user, fetchCart]);
 
-  // Reset page to 1 when filters change
   const handleCategorySelect = (category) => {
     setSelectedCategory(category);
     setPage(1);
@@ -127,13 +146,11 @@ export default function App() {
     setPage(1);
   };
 
-  // Ensure user is authenticated before adding to cart
   const ensureAuthenticated = async () => {
     const existingUser = getUser();
     const token = getToken();
     if (existingUser && token) return true;
 
-    // Attempt auto-login as Alice (demo account) if no user logged in
     try {
       const { data: tokenData } = await apiRequest('/auth/login', 'POST', {
         email: 'alice@example.com',
@@ -153,7 +170,6 @@ export default function App() {
     }
   };
 
-  // Add Item to Cart
   const handleAddToCart = async (productId) => {
     const authenticated = await ensureAuthenticated();
     if (!authenticated) return;
@@ -170,7 +186,6 @@ export default function App() {
     }
   };
 
-  // Update Cart Item Quantity
   const handleUpdateQuantity = async (itemId, newQuantity) => {
     if (newQuantity <= 0) {
       return handleRemoveItem(itemId);
@@ -183,7 +198,6 @@ export default function App() {
     }
   };
 
-  // Remove Item from Cart
   const handleRemoveItem = async (itemId) => {
     try {
       await apiRequest(`/cart/items/${itemId}`, 'DELETE', null, true);
@@ -193,7 +207,6 @@ export default function App() {
     }
   };
 
-  // Atomic Idempotent Checkout Execution
   const handleCheckout = async () => {
     if (!cart?.cart_items || cart.cart_items.length === 0) {
       showToast('error', 'Empty Cart', 'Please add products to your cart before checking out.');
@@ -212,15 +225,14 @@ export default function App() {
         { 'Idempotency-Key': idempotencyKey }
       );
 
-      // Reset cart locally & refetch products to update stock numbers
       setCart({ cart_items: [] });
       setIsCartOpen(false);
       await fetchProducts();
 
       showToast(
         'success',
-        '⚡ Atomic Checkout Confirmed!',
-        `Order confirmed with Idempotency-Key: ${idempotencyKey}. Total: $${parseFloat(order.total_amount).toFixed(2)}`,
+        '⚡ Atomic Checkout Confirmed & Tasks Offloaded!',
+        `Order #${String(order.id).substring(0,8)} confirmed! ARQ background tasks dispatched for receipt generation and stock audit.`,
         order.id
       );
 
@@ -236,6 +248,7 @@ export default function App() {
     setUser(null);
     setCart({ cart_items: [] });
     setIsProfileOpen(false);
+    setIsAdminView(false);
     showToast('success', 'Logged Out', 'You have been logged out.');
   };
 
@@ -254,53 +267,57 @@ export default function App() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onLogout={handleLogout}
+        isAdminView={isAdminView}
+        onToggleAdmin={() => setIsAdminView(!isAdminView)}
       />
 
-      {/* Category Pills Bar */}
-      <CategoryBar
-        selectedCategory={selectedCategory}
-        onSelectCategory={handleCategorySelect}
-      />
+      {/* Conditional View Rendering: Admin Dashboard vs Storefront */}
+      {isAdminView ? (
+        <AdminDashboard user={user} onAuthSuccess={(u) => setUser(u)} />
+      ) : (
+        <>
+          <CategoryBar
+            selectedCategory={selectedCategory}
+            onSelectCategory={handleCategorySelect}
+          />
 
-      {/* Main Body Layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Control Bar: Price Filters, Sort, Page Size */}
-        <ControlBar
-          minPrice={minPrice}
-          setMinPrice={(v) => { setMinPrice(v); setPage(1); }}
-          maxPrice={maxPrice}
-          setMaxPrice={(v) => { setMaxPrice(v); setPage(1); }}
-          sortBy={sortBy}
-          setSortBy={setSortBy}
-          sortOrder={sortOrder}
-          setSortOrder={setSortOrder}
-          pageSize={pageSize}
-          setPageSize={(s) => { setPageSize(s); setPage(1); }}
-          totalCount={totalCount}
-        />
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <HeroBanner onSelectCategory={handleCategorySelect} />
 
-        {/* Product Cards Grid */}
-        <ProductGrid
-          products={products}
-          loading={loading}
-          onAddToCart={handleAddToCart}
-          addingId={addingId}
-        />
+            <ControlBar
+              minPrice={minPrice}
+              setMinPrice={(v) => { setMinPrice(v); setPage(1); }}
+              maxPrice={maxPrice}
+              setMaxPrice={(v) => { setMaxPrice(v); setPage(1); }}
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+              sortOrder={sortOrder}
+              setSortOrder={setSortOrder}
+              pageSize={pageSize}
+              setPageSize={(s) => { setPageSize(s); setPage(1); }}
+              totalCount={totalCount}
+            />
 
-        {/* Pagination Bar */}
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          totalCount={totalCount}
-          onPageChange={(newPage) => { setPage(newPage); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-        />
+            <ProductGrid
+              products={products}
+              loading={loading}
+              onAddToCart={handleAddToCart}
+              addingId={addingId}
+            />
 
-      </main>
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              totalCount={totalCount}
+              onPageChange={(newPage) => { setPage(newPage); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            />
+          </main>
+        </>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-950 py-8 text-center text-xs text-slate-500">
-        <p>MiniCommerce V2 Laboratory — Built with FastAPI, PostgreSQL (Supabase), SQLAlchemy 2.x & React Vite SPA</p>
+        <p>MiniCommerce V4 Laboratory — Asynchronous ARQ Task Queue, Redis Rate Limiting & Admin Observability</p>
       </footer>
 
       {/* Cart Drawer */}
@@ -323,12 +340,19 @@ export default function App() {
         onLoginSuccess={(u) => { setUser(u); fetchCart(); }}
       />
 
-      {/* User Profile & Order History Modal */}
+      {/* User Profile Modal */}
       <ProfileModal
         isOpen={isProfileOpen}
         onClose={() => setIsProfileOpen(false)}
         user={user}
         productsMap={productsMap}
+      />
+
+      {/* Rate Limit Modal */}
+      <RateLimitModal
+        isOpen={isRateLimitOpen}
+        cooldownSeconds={rateLimitCooldown}
+        onClose={() => setIsRateLimitOpen(false)}
       />
 
       {/* Toast Notification */}

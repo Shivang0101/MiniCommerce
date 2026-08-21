@@ -139,21 +139,21 @@ export default function CartDrawer({
                 </span>
               </div>
 
-              {/* Checkout Button */}
+              {/* Checkout Button & Order Status Pill */}
               <button
                 onClick={onCheckout}
                 disabled={isCheckingOut}
                 className="btn btn-accent w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
               >
                 {isCheckingOut ? (
-                  <>
+                  <div className="flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>Processing Atomic Lock...</span>
-                  </>
+                    <span className="animate-pulse">Processing ➔ Confirmed ➔ Receipt Emailed</span>
+                  </div>
                 ) : (
                   <>
                     <Zap className="w-4 h-4 fill-white" />
-                    <span>⚡ Atomic Checkout</span>
+                    <span>⚡ Atomic Checkout (ARQ Offloaded)</span>
                   </>
                 )}
               </button>
