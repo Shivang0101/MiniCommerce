@@ -15,9 +15,10 @@ class UserRepository:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def create(db: AsyncSession, email: str, password_hash: str) -> User:
-        user = User(email=email, password_hash=password_hash)
+    async def create(db: AsyncSession, email: str, password_hash: str, is_admin: bool = False, role: str = "CUSTOMER") -> User:
+        user = User(email=email, password_hash=password_hash, is_admin=is_admin, role=role)
         db.add(user)
         await db.commit()
         await db.refresh(user)
         return user
+

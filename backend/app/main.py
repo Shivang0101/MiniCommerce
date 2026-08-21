@@ -13,23 +13,37 @@ from app.db.base import Base
 from app.core.redis import init_redis_pool, close_redis_pool
 from app.api.v1.health import health_router
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize database schema and Redis/ARQ pools on startup
+    # Initialize database schema and V5 runtime column migrations
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) NOT NULL DEFAULT 'CUSTOMER';"))
         await conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);"))
+        await conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payload_hash VARCHAR(255);"))
+        await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"))
+        await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;"))
+    
     await init_redis_pool()
+    logger.info("MiniCommerce V5 Laboratory Backend initialized successfully.")
     yield
+    logger.info("Initiating graceful shutdown sequence: draining connection pools and closing resources...")
     await close_redis_pool()
+    await engine.dispose()
+    logger.info("Graceful shutdown complete.")
 
 app = FastAPI(
-    title="MiniCommerce V4 Laboratory",
-    description="Asynchronous Task Processing, Redis Rate Limiting & Observability Laboratory",
-    version="4.0.0",
+    title="MiniCommerce V5 Laboratory",
+    description="Enterprise Security, Distributed Resilience & Advanced Data Engineering Laboratory",
+    version="5.0.0",
     lifespan=lifespan
 )
+
 
 # Exception handlers
 app.add_exception_handler(HTTPException, api_exception_handler)

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Search, Zap, User, LogOut, ShieldCheck, History, Bell, Activity, Gauge, MapPin, ChevronDown } from 'lucide-react';
 
-export default function Navbar({ search, setSearch, cartCount, user, onOpenCart, onOpenAuth, onLogout, onOpenProfile, isAdminView, onToggleAdmin }) {
+export default function Navbar({ search, setSearch, cartCount, user, onOpenCart, onOpenAuth, onLogout, onOpenProfile, isAdminView, onToggleAdmin, onOpenStoreManager }) {
   const [notifications, setNotifications] = useState([
     { id: "init_1", type: "SYSTEM", title: "ARQ Worker Online", message: "Background task queue worker connected to Redis.", timestamp: Date.now() / 1000 }
   ]);
@@ -20,6 +20,8 @@ export default function Navbar({ search, setSearch, cartCount, user, onOpenCart,
     window.addEventListener("ratelimit-update", handleRateLimitUpdate);
     return () => window.removeEventListener("ratelimit-update", handleRateLimitUpdate);
   }, []);
+
+  const isStoreManager = user && (user.is_admin || user.role === 'STORE_MANAGER' || user.role === 'SRE_ADMIN');
 
   return (
     <header className="sticky top-0 z-40 w-full glass-panel border-b border-slate-800/90 bg-slate-950/95 backdrop-blur-xl shadow-2xl">
@@ -97,6 +99,17 @@ export default function Navbar({ search, setSearch, cartCount, user, onOpenCart,
             </div>
           </div>
 
+          {/* Store Manager Portal Button */}
+          {isStoreManager && onOpenStoreManager && (
+            <button
+              onClick={onOpenStoreManager}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all"
+              title="Store Manager Inventory & Catalog Portal"
+            >
+              <span>🏬 Store Portal</span>
+            </button>
+          )}
+
           {/* Admin Observability Toggle Button */}
           <button
             onClick={onToggleAdmin}
@@ -110,6 +123,7 @@ export default function Navbar({ search, setSearch, cartCount, user, onOpenCart,
             <Activity className="w-4 h-4 text-cyan-400" />
             <span>{isAdminView ? 'Storefront' : 'Admin Panel'}</span>
           </button>
+
 
           {/* Notification Inbox Bell */}
           <div className="relative">

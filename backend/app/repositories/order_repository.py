@@ -11,7 +11,10 @@ class OrderRepository:
         stmt = (
             select(Order)
             .where(Order.id == order_id)
-            .options(selectinload(Order.order_items).selectinload(OrderItem.product))
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.order_items).selectinload(OrderItem.product)
+            )
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
@@ -21,7 +24,10 @@ class OrderRepository:
         stmt = (
             select(Order)
             .where(Order.id == order_id, Order.user_id == user_id)
-            .options(selectinload(Order.order_items).selectinload(OrderItem.product))
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.order_items).selectinload(OrderItem.product)
+            )
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
@@ -31,7 +37,10 @@ class OrderRepository:
         stmt = (
             select(Order)
             .where(Order.user_id == user_id, Order.idempotency_key == idempotency_key)
-            .options(selectinload(Order.order_items).selectinload(OrderItem.product))
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.order_items).selectinload(OrderItem.product)
+            )
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
@@ -41,11 +50,15 @@ class OrderRepository:
         stmt = (
             select(Order)
             .where(Order.user_id == user_id)
-            .options(selectinload(Order.order_items).selectinload(OrderItem.product))
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.order_items).selectinload(OrderItem.product)
+            )
             .order_by(Order.created_at.desc())
         )
         result = await db.execute(stmt)
         return list(result.scalars().all())
+
 
     @staticmethod
     async def create_order(
@@ -53,17 +66,20 @@ class OrderRepository:
         user_id: uuid.UUID,
         status: str,
         total_amount: Decimal,
-        idempotency_key: str | None = None
+        idempotency_key: str | None = None,
+        payload_hash: str | None = None
     ) -> Order:
         order = Order(
             user_id=user_id,
             status=status,
             total_amount=total_amount,
-            idempotency_key=idempotency_key
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash
         )
         db.add(order)
         await db.flush()
         return order
+
 
     @staticmethod
     async def add_order_item(

@@ -9,6 +9,7 @@ import CartDrawer from './components/CartDrawer';
 import AuthModal from './components/AuthModal';
 import ProfileModal from './components/ProfileModal';
 import AdminDashboard from './components/AdminDashboard';
+import StoreManagerDashboard from './components/StoreManagerDashboard';
 import RateLimitModal from './components/RateLimitModal';
 import Toast from './components/Toast';
 import { apiRequest, getUser, getToken, clearAuth, setAuth } from './api';
@@ -30,12 +31,13 @@ export default function App() {
   // Products Map (id -> Product object for fast cart & order rendering)
   const [productsMap, setProductsMap] = useState({});
 
-  // Cart, Auth & Profile State
+  // Cart, Auth, Profile & Store Manager State
   const [cart, setCart] = useState({ cart_items: [] });
   const [user, setUser] = useState(getUser());
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isStoreManagerOpen, setIsStoreManagerOpen] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [addingId, setAddingId] = useState(null);
 
@@ -50,6 +52,7 @@ export default function App() {
   const showToast = (type, title, message, orderId = null) => {
     setToast({ type, title, message, orderId });
   };
+
 
   // Rate limit event listener
   useEffect(() => {
@@ -269,6 +272,7 @@ export default function App() {
         onLogout={handleLogout}
         isAdminView={isAdminView}
         onToggleAdmin={() => setIsAdminView(!isAdminView)}
+        onOpenStoreManager={() => setIsStoreManagerOpen(true)}
       />
 
       {/* Conditional View Rendering: Admin Dashboard vs Storefront */}
@@ -317,7 +321,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-950 py-8 text-center text-xs text-slate-500">
-        <p>MiniCommerce V4 Laboratory — Asynchronous ARQ Task Queue, Redis Rate Limiting & Admin Observability</p>
+        <p>MiniCommerce V5 Laboratory — Zero-Trust Security, Distributed Resilience & Advanced Data Engineering</p>
       </footer>
 
       {/* Cart Drawer */}
@@ -348,12 +352,21 @@ export default function App() {
         productsMap={productsMap}
       />
 
+      {/* Store Manager Portal Modal */}
+      {isStoreManagerOpen && (
+        <StoreManagerDashboard
+          onClose={() => setIsStoreManagerOpen(false)}
+          onNotification={(msg) => showToast('success', 'Store Manager Portal', msg)}
+        />
+      )}
+
       {/* Rate Limit Modal */}
       <RateLimitModal
         isOpen={isRateLimitOpen}
         cooldownSeconds={rateLimitCooldown}
         onClose={() => setIsRateLimitOpen(false)}
       />
+
 
       {/* Toast Notification */}
       <Toast toast={toast} onClose={() => setToast(null)} />

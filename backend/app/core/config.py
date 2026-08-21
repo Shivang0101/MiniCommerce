@@ -7,7 +7,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./minicommerce.db"
     JWT_SECRET: str = "supersecretkey_minicommerce_v1_laboratory_key_2026"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_COOKIE_NAME: str = "refresh_token"
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_TTL_SECONDS: int = 300
 

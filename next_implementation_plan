@@ -1,47 +1,95 @@
-### Task: Implement MiniCommerce V3 Specification
+================================================================================
+MINICOMMERCE V5 MASTER IMPLEMENTATION PLAN
+Target: Enterprise Security, Distributed Resilience & Advanced Data Engineering
+================================================================================
 
-We are evolving the **MiniCommerce** backend laboratory from V2 to **V3: Containerization, In-Memory Caching & Distributed State Resilience**.
+Phase Objective:
+Transform the MiniCommerce laboratory into an enterprise-grade, resilient production platform. 
+This phase introduces Zero-Trust Security (Refresh Token Rotation, HttpOnly Cookies, Redis Token Revocation, Scoped RBAC), Distributed Resilience Patterns (Circuit Breakers, Transactional Outbox Pattern, Graceful SIGTERM Shutdown, Health Probe Separation), and Advanced Data Engineering (Keyset Pagination, Soft Deletes, Connection Pool Tuning, and Payload-Hashed Idempotency).
 
-#### Current State (V2 Complete):
-* 5-tier architecture: Routers → Services → Repositories → SQLAlchemy 2.x AsyncSession → Remote Supabase PostgreSQL (409k records).
-* Concurrency control: `SELECT FOR UPDATE` with deterministic ID ordering and composite unique idempotency constraints.
-* Frontend: React 18 + Vite 5 SPA.
+--------------------------------------------------------------------------------
+STEP 1: ZERO-TRUST SECURITY, TOKEN ROTATION & SCOPED RBAC
+--------------------------------------------------------------------------------
+1. Token Revocation List (Redis Blacklist):
+   - Create `app/services/token_blacklist.py` service.
+   - Upon `POST /api/v1/auth/logout`, store the JWT `jti` (JWT ID) in Redis with a TTL matching the token's remaining lifespan.
+   - Update `deps.get_current_user` to check Redis before granting endpoint authorization.
 
----
+2. Dual-Token System & Refresh Token Rotation:
+   - Access Token: Short-lived (15 minutes), passed via `Authorization: Bearer <token>` header.
+   - Refresh Token: Long-lived (7 days), stored in `HttpOnly`, `Secure`, `SameSite=Strict` cookie.
+   - Implement `POST /api/v1/auth/refresh`: Validates Refresh Token, revokes old Refresh Token, and issues a new Access Token + rotated Refresh Token pair.
 
-### V3 Constraints & Resource Optimization Guidelines:
-1. **Remote Database Strategy**: Do NOT run a local PostgreSQL container. Keep pointing the FastAPI container directly to the remote **Supabase PostgreSQL instance** to eliminate local disk consumption for database storage.
-2. **Minimal Base Images**:
-   - Backend: `python:3.12-slim`
-   - Redis: `redis:alpine` (or `redis:7-alpine`)
-   - Frontend: Multi-stage build (`node:20-alpine` for building assets, `nginx:alpine` for serving)
-3. **Build Cleanliness**: Ensure Dockerfiles avoid caching redundant pip/npm layers (`--no-cache-dir`, `--no-cache`) and include `.dockerignore` to keep image builds lean and compatible with `docker system prune`.
+3. Scoped Role-Based Access Control (RBAC):
+   - Expand roles: `CUSTOMER`, `STORE_MANAGER`, `SRE_ADMIN`.
+   - Define permission scopes (`products:read`, `products:write`, `products:delete`, `stock:update`, `orders:create`, `admin:telemetry`).
+   - Create `deps.require_scope(scope_name)` dependency for fine-grained authorization.
+   - `STORE_MANAGER` role can create/edit products, restock inventory, and soft-delete items.
 
----
+--------------------------------------------------------------------------------
+STEP 2: DISTRIBUTED RESILIENCE PATTERNS (CIRCUIT BREAKER & TRANSACTIONAL OUTBOX)
+--------------------------------------------------------------------------------
+1. Circuit Breaker Pattern (`app/core/circuit_breaker.py`):
+   - Implement a thread-safe Circuit Breaker state machine (`CLOSED` -> `OPEN` -> `HALF-OPEN`).
+   - Monitor error rate across database queries and Redis calls over a 10s sliding window.
+   - If failure rate exceeds 50%, trip breaker to `OPEN` for 15s to isolate downstream failures and prevent cascading thread exhaustion.
 
-### Key Requirements for V3:
+2. Transactional Outbox Pattern (100% Guaranteed Event Delivery):
+   - Create `outbox` table in PostgreSQL: `id`, `event_type`, `payload_json`, `status` (PENDING/PROCESSED), `created_at`.
+   - Update `OrderService.create_order_checkout`: Write order, deduct stock, AND insert `outbox` record inside the SAME atomic SQL transaction (`db.commit()`).
+   - Create ARQ background outbox processor (`process_outbox_events` task) polling PENDING outbox records, pushing jobs to ARQ, and marking outbox records as PROCESSED.
 
-1. **Local Container Orchestration (`docker-compose.yml`)**:
-   - Define lightweight services: `backend`, `redis`, and `frontend`.
-   - Configure container networking, environment variable forwarding (`DATABASE_URL` pointing to Supabase, `REDIS_URL=redis://redis:6379/0`), and health dependency rules.
+3. Graceful Shutdown & Signal Handling (`SIGTERM` / `SIGINT`):
+   - Intercept `SIGTERM` in FastAPI lifespan and ARQ worker.
+   - Stop accepting new HTTP connections; allow active checkout transactions up to 30 seconds to finish.
+   - Gracefully drain connection pools (`await engine.dispose()`) and close Redis connections.
 
-2. **Async Redis Caching Layer (`app/core/redis.py` & `app/services/cache_service.py`)**:
-   - Implement singleton connection pool management within FastAPI's lifespan handlers.
-   - Implement the **Cache-Aside pattern** for `GET /api/v1/products` queries with configurable TTLs and structured key naming (`products:page={p}:size={s}:cat={c}:search={q}`).
-   - Implement **Write Invalidation**: Invalidate matching product cache keys when stock changes or new orders are placed in `order_service.py`.
+--------------------------------------------------------------------------------
+STEP 3: STRUCTURED LOGGING, CORRELATED TRACING & HEALTH PROBE SEPARATION
+--------------------------------------------------------------------------------
+1. Structured JSON Logger:
+   - Configure Python `logging` to format output as structured JSON (`timestamp`, `level`, `trace_id`, `span_id`, `user_id`, `duration_ms`, `http_status`).
+   - Ensure trace IDs flow through all FastAPI middlewares, DB queries, and ARQ background workers.
 
-3. **Fault-Tolerance & Cache Stampede Resilience**:
-   - Implement graceful degradation: If Redis is unreachable, down, or times out, the service layer must log a warning and fall back to querying Supabase PostgreSQL directly without throwing a 500 error to the client.
+2. Health Probe Separation (`/healthz/liveness` vs `/healthz/readiness`):
+   - `GET /healthz/liveness`: Returns `200 OK` if Uvicorn process is running.
+   - `GET /healthz/readiness`: Executes `SELECT 1` on PostgreSQL and `PING` on Redis. Returns `200 OK` only if downstream stores are healthy (returns `503 Service Unavailable` for ALB routing isolation if DB drops).
 
-4. **Health & Readiness Endpoints (`app/api/v1/health.py`)**:
-   - `/healthz`: Liveness check (verifies FastAPI process is alive).
-   - `/readyz`: Readiness check (actively verifies downstream connectivity to both Supabase PostgreSQL and Redis).
+--------------------------------------------------------------------------------
+STEP 4: ADVANCED DATA ENGINEERING & IDEMPOTENCY PAYLOAD HASHING
+--------------------------------------------------------------------------------
+1. Keyset (Cursor-Based) Pagination:
+   - Add Keyset pagination helper to `ProductRepository`:
+     `SELECT * FROM products WHERE id > :last_seen_id AND is_deleted = FALSE ORDER BY id ASC LIMIT :page_size`
+   - Eliminates deep `OFFSET` buffer scan overhead on catalog queries.
 
-5. **Automated Verification & Docs**:
-   - Tests covering cache hits, cache misses, invalidation triggers, and Redis connection fallback.
-   - Documentation in `docs/v3/` capturing latency comparisons (DB direct vs. Redis hit) and container topology.
+2. Soft Deletion & Audit Timestamps:
+   - Add `is_deleted: bool = False` and `deleted_at: datetime | None = None` to `Product` model.
+   - Update `delete_product` repository method to perform soft deletion (`is_deleted = True`) instead of physical row deletion.
 
----
+3. Payload-Hashed Idempotency Engine:
+   - Compute `SHA-256` hash of checkout request payload.
+   - Store hash alongside `idempotency_key` in PostgreSQL / Redis.
+   - If retry request matches key but has a different payload, reject immediately with `HTTP 409 Conflict`.
 
-### Output Needed:
-Provide the step-by-step implementation plan, Dockerfiles, `docker-compose.yml`, caching architecture code (`redis.py`, `cache_service.py`, updated `product_service.py`), health probes, and verification steps.
+4. Connection Pool Tuning:
+   - Configure `create_async_engine`: `pool_size=15`, `max_overflow=10`, `pool_recycle=1800`, `pool_pre_ping=True`.
+
+--------------------------------------------------------------------------------
+STEP 5: FRONTEND STORE MANAGER PORTAL & REFRESH TOKEN INTERCEPTOR
+--------------------------------------------------------------------------------
+1. Axios/Fetch Interceptor for Token Rotation (`api.js`):
+   - Catch `HTTP 401` errors, call `POST /auth/refresh` with HttpOnly cookie, and retry original request seamlessly.
+
+2. Store Manager Dashboard Portal (`StoreManagerDashboard.jsx`):
+   - Management interface for store managers to add new products, update stock quantities, and soft-delete catalog items using scoped RBAC.
+
+--------------------------------------------------------------------------------
+STEP 6: AUTOMATED PYTEST SUITE EXPANSION & VERIFICATION
+--------------------------------------------------------------------------------
+1. Add `tests/test_v5_security.py`:
+   - Test Refresh Token rotation, token revocation list, and RBAC scope enforcement.
+2. Add `tests/test_v5_resilience.py`:
+   - Test Circuit Breaker state transitions, Transactional Outbox pattern polling, and payload-hashed idempotency conflict checks.
+3. Add `tests/test_v5_data.py`:
+   - Test Keyset pagination boundary conditions and soft deletion queries.

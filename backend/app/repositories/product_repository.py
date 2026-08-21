@@ -6,10 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.product import Product
 from app.schemas.product import ProductCreate
 
+from datetime import datetime, timezone
+
 class ProductRepository:
     @staticmethod
-    async def get_by_id(db: AsyncSession, product_id: uuid.UUID) -> Product | None:
-        result = await db.execute(select(Product).where(Product.id == product_id))
+    async def get_by_id(db: AsyncSession, product_id: uuid.UUID, include_deleted: bool = False) -> Product | None:
+        stmt = select(Product).where(Product.id == product_id)
+        if not include_deleted:
+            stmt = stmt.where(Product.is_deleted == False)
+        result = await db.execute(stmt)
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -22,9 +27,12 @@ class ProductRepository:
         sort_by: str = "name",
         sort_order: str = "asc",
         search: str | None = None,
-        category: str | None = None
+        category: str | None = None,
+        include_deleted: bool = False
     ) -> tuple[list[Product], int]:
         stmt = select(Product)
+        if not include_deleted:
+            stmt = stmt.where(Product.is_deleted == False)
 
         # Apply search and category filters
         if search:
@@ -72,6 +80,23 @@ class ProductRepository:
         return products, total_count
 
     @staticmethod
+    async def get_products_keyset(
+        db: AsyncSession,
+        last_seen_id: uuid.UUID | None = None,
+        limit: int = 20
+    ) -> list[Product]:
+        """
+        Keyset (cursor-based) pagination avoiding deep OFFSET scan overhead.
+        Query: SELECT * FROM products WHERE id > :last_seen_id AND is_deleted = FALSE ORDER BY id ASC LIMIT :limit
+        """
+        stmt = select(Product).where(Product.is_deleted == False)
+        if last_seen_id:
+            stmt = stmt.where(Product.id > last_seen_id)
+        stmt = stmt.order_by(Product.id.asc()).limit(limit)
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get_by_ids_for_update(db: AsyncSession, product_ids: list[uuid.UUID]) -> list[Product]:
         """
         Fetch products by IDs using row-level locking (SELECT ... FOR UPDATE).
@@ -86,6 +111,7 @@ class ProductRepository:
         stmt = (
             select(Product)
             .where(Product.id.in_(sorted_ids))
+            .where(Product.is_deleted == False)
             .order_by(Product.id.asc())
             .with_for_update()
         )
@@ -106,12 +132,21 @@ class ProductRepository:
         return product
 
     @staticmethod
+    async def soft_delete(db: AsyncSession, product_id: uuid.UUID) -> bool:
+        """Performs soft deletion (is_deleted = True, deleted_at = now()) instead of physical row deletion."""
+        product = await ProductRepository.get_by_id(db, product_id, include_deleted=True)
+        if not product or product.is_deleted:
+            return False
+        product.is_deleted = True
+        product.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+        return True
+
+    @staticmethod
     async def update_stock_atomic(db: AsyncSession, product_id: uuid.UUID, quantity: int) -> bool:
-        """
-        Atomic update: UPDATE products SET stock = stock - quantity WHERE id = product_id AND stock >= quantity
-        """
         product = await ProductRepository.get_by_id(db, product_id)
         if not product or product.stock < quantity:
             return False
         product.stock -= quantity
         return True
+

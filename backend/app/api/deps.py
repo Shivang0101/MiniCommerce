@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import AsyncSessionLocal
 from app.core.security import decode_access_token
 from app.services.auth_service import AuthService
-from app.models.user import User
+from app.models.user import User, ROLE_SCOPES
+from app.services.token_blacklist import TokenBlacklistService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -31,6 +32,21 @@ async def get_current_user(
     if payload is None:
         raise credentials_exception
     
+    # Check if token is access token type
+    token_type = payload.get("type")
+    if token_type and token_type != "access":
+        raise credentials_exception
+
+    jti = payload.get("jti")
+    if jti:
+        is_revoked = await TokenBlacklistService.is_token_revoked(jti)
+        if is_revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     sub: str | None = payload.get("sub")
     if sub is None:
         raise credentials_exception
@@ -49,9 +65,25 @@ async def get_current_user(
 async def get_current_admin_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
-    if not current_user.is_admin:
+    if not current_user.is_admin and current_user.role != "SRE_ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
     return current_user
+
+def require_scope(required_scope: str):
+    async def scope_dependency(current_user: User = Depends(get_current_user)) -> User:
+        user_role = getattr(current_user, "role", "CUSTOMER") or "CUSTOMER"
+        if current_user.is_admin and user_role == "CUSTOMER":
+            user_role = "SRE_ADMIN"
+        
+        user_scopes = ROLE_SCOPES.get(user_role, ROLE_SCOPES["CUSTOMER"])
+        if required_scope not in user_scopes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Missing required scope '{required_scope}' for role '{user_role}'"
+            )
+        return current_user
+    return scope_dependency
+

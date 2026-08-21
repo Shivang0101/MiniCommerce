@@ -40,13 +40,35 @@ export async function apiRequest(endpoint, method = "GET", body = null, requireA
   const options = {
     method,
     headers,
+    credentials: "same-origin"
   };
 
   if (body) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+  let response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+
+  // Catch 401 unauthorized and attempt automatic token rotation refresh if token present
+  if (response.status === 401 && requireAuth && endpoint !== "/auth/refresh" && endpoint !== "/auth/login") {
+    try {
+      const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin"
+      });
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        if (refreshData && refreshData.access_token) {
+          localStorage.setItem("token", refreshData.access_token);
+          headers["Authorization"] = `Bearer ${refreshData.access_token}`;
+          response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+        }
+      }
+    } catch (_) {
+      // Ignore refresh error and fall through to default error handling
+    }
+  }
 
   // Parse Rate Limit Headers
   const limit = response.headers.get("X-RateLimit-Limit");
@@ -82,3 +104,4 @@ export async function apiRequest(endpoint, method = "GET", body = null, requireA
   const data = text ? JSON.parse(text) : null;
   return { data, totalCount };
 }
+

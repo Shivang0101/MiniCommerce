@@ -18,22 +18,39 @@ class OrderService:
         user_id: uuid.UUID, 
         idempotency_key: str | None = None
     ) -> Order:
+        import hashlib
         start_time = time.time()
+
         # 1. Idempotency Check: if idempotency_key is provided, check if order already exists
         if idempotency_key:
             existing_order = await OrderRepository.get_by_idempotency_key(db, user_id, idempotency_key)
             if existing_order:
+                cart_check = await CartRepository.get_by_user_id(db, user_id)
+                if cart_check and cart_check.cart_items:
+                    cart_repr_check = ",".join(sorted([f"{item.product_id}:{item.quantity}" for item in cart_check.cart_items]))
+                    current_hash = hashlib.sha256(f"{user_id}:{cart_repr_check}".encode('utf-8')).hexdigest()
+                    if existing_order.payload_hash and existing_order.payload_hash != current_hash:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Idempotency key reused with different request payload"
+                        )
                 return existing_order
 
-        try:
-            # 2. Fetch user's cart
-            cart = await CartRepository.get_by_user_id(db, user_id)
-            if not cart or not cart.cart_items:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot checkout with an empty cart"
-                )
 
+        # 2. Fetch user's cart
+        cart = await CartRepository.get_by_user_id(db, user_id)
+        if not cart or not cart.cart_items:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot checkout with an empty cart"
+            )
+
+        # Compute payload hash (sorted item tuples: product_id:quantity)
+        cart_repr = ",".join(sorted([f"{item.product_id}:{item.quantity}" for item in cart.cart_items]))
+        payload_hash = hashlib.sha256(f"{user_id}:{cart_repr}".encode('utf-8')).hexdigest()
+
+
+        try:
             # 3. Eagerly lock products with FOR UPDATE in deterministic ID order to prevent deadlocks
             lock_start = time.time()
             product_ids = [item.product_id for item in cart.cart_items]
@@ -77,8 +94,10 @@ class OrderService:
                 user_id=user_id,
                 status="CONFIRMED",
                 total_amount=total_amount,
-                idempotency_key=idempotency_key
+                idempotency_key=idempotency_key,
+                payload_hash=payload_hash
             )
+
 
             for item_data in order_items_to_create:
                 await OrderRepository.add_order_item(
@@ -92,10 +111,29 @@ class OrderService:
             # 6. Clear Cart Items
             await CartRepository.clear_cart_items(db, cart)
 
+            # 6b. Insert Transactional Outbox Event inside the SAME atomic SQL transaction
+            from app.repositories.outbox_repository import OutboxRepository
+            outbox_payload = json.dumps({
+                "order_id": str(order.id),
+                "user_id": str(user_id),
+                "total_amount": str(total_amount),
+                "item_count": len(cart.cart_items),
+                "products": [
+                    {
+                        "product_id": str(p.id),
+                        "name": p.name,
+                        "remaining_stock": p.stock
+                    }
+                    for p in locked_products
+                ]
+            })
+            await OutboxRepository.create_event(db, event_type="ORDER_CREATED", payload_json=outbox_payload)
+
             # 7. Commit transaction atomically
             commit_start = time.time()
             await db.commit()
             insert_order_ms = round((time.time() - commit_start) * 1000, 2)
+
 
             # 8. Invalidate product catalog cache upon stock update
             from app.services.cache_service import CacheService
@@ -104,7 +142,7 @@ class OrderService:
             # 9. Post-Commit Asynchronous Task Offloading & Trace Recording
             arq_start = time.time()
             created_order = await OrderRepository.get_by_id_for_user(db, user_id, order.id)
-            user_email = created_order.user.email if created_order.user else "customer@example.com"
+            user_email = created_order.user.email if (created_order and created_order.user) else "customer@example.com"
             
             # Set initial order processing status in Redis
             redis = get_redis()
@@ -169,7 +207,8 @@ class OrderService:
             ]
             await TraceService.record_trace(trace_id, "POST /api/v1/orders/checkout", total_checkout_ms, spans)
 
-            return created_order
+            return created_order or order
+
 
         except HTTPException:
             await db.rollback()
@@ -180,6 +219,8 @@ class OrderService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Checkout failed: {str(e)}"
             )
+
+
 
     @staticmethod
     async def get_user_orders(db: AsyncSession, user_id: uuid.UUID) -> list[Order]:

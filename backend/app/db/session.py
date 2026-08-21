@@ -17,12 +17,21 @@ if "asyncpg" in db_url:
         "prepared_statement_cache_size": 0
     }
 
-engine = create_async_engine(
-    db_url,
-    echo=False,
-    future=True,
-    connect_args=connect_args
-)
+engine_kwargs = {
+    "echo": False,
+    "future": True,
+    "connect_args": connect_args
+}
+if "sqlite" not in db_url:
+    engine_kwargs.update({
+        "pool_size": 15,
+        "max_overflow": 10,
+        "pool_recycle": 1800,
+        "pool_pre_ping": True
+    })
+
+engine = create_async_engine(db_url, **engine_kwargs)
+
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

@@ -17,7 +17,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-def create_access_token(subject: str | Any, expires_delta: timedelta | None = None) -> str:
+def create_access_token(
+    subject: str | Any, 
+    scopes: list[str] | None = None, 
+    expires_delta: timedelta | None = None
+) -> str:
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
@@ -25,6 +29,24 @@ def create_access_token(subject: str | Any, expires_delta: timedelta | None = No
     
     to_encode = {
         "sub": str(subject),
+        "jti": str(uuid.uuid4()),
+        "type": "access",
+        "scopes": scopes or [],
+        "exp": expire
+    }
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return encoded_jwt
+
+def create_refresh_token(subject: str | Any, expires_delta: timedelta | None = None) -> str:
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    
+    to_encode = {
+        "sub": str(subject),
+        "jti": str(uuid.uuid4()),
+        "type": "refresh",
         "exp": expire
     }
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
@@ -36,3 +58,4 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
         return payload
     except jwt.PyJWTError:
         return None
+

@@ -17,7 +17,12 @@ class AuthService:
             )
         
         hashed_pwd = hash_password(user_in.password)
-        return await UserRepository.create(db, user_in.email, hashed_pwd)
+        is_admin = getattr(user_in, "is_admin", False)
+        role = getattr(user_in, "role", "CUSTOMER")
+        if is_admin and role == "CUSTOMER":
+            role = "SRE_ADMIN"
+        return await UserRepository.create(db, user_in.email, hashed_pwd, is_admin=is_admin, role=role)
+
 
     @staticmethod
     async def authenticate_user(db: AsyncSession, email: str, password: str) -> User:

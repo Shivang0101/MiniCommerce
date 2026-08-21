@@ -8,12 +8,14 @@ health_router = APIRouter(tags=["Health"])
 
 
 @health_router.get("/healthz", status_code=status.HTTP_200_OK)
+@health_router.get("/healthz/liveness", status_code=status.HTTP_200_OK)
 async def liveness_probe():
     """Liveness probe to verify FastAPI process is responsive."""
     return {"status": "ok", "service": "minicommerce-backend"}
 
 
 @health_router.get("/readyz")
+@health_router.get("/healthz/readiness")
 async def readiness_probe(response: Response, db: AsyncSession = Depends(get_db)):
     """
     Readiness probe to verify active downstream connections to both:
@@ -50,3 +52,4 @@ async def readiness_probe(response: Response, db: AsyncSession = Depends(get_db)
             "redis": "connected" if redis_ok else "unreachable"
         }
     }
+
