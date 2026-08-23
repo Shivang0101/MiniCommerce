@@ -66,13 +66,27 @@ sequenceDiagram
 - `id`: UUID Primary Key
 - `event_type`: String (e.g. `"ORDER_CREATED"`)
 - `payload_json`: JSON text containing order details, items, stock, and user email
-- `status`: String (`"PENDING"`, `"PROCESSED"`)
+- `status`: String (`"PENDING"`, `"PROCESSED"`, `"FAILED"`, `"DEAD_LETTER"`)
+- `retry_count`: Integer tracking execution attempts (default 0)
+- `max_retries`: Integer threshold before DLQ transition (default 3)
+- `last_error`: Text field capturing failure backtrace
 - `created_at`: Timestamp with timezone
 - `processed_at`: Timestamp with timezone
 
 ---
 
-## 🛑 3. Graceful Shutdown & Signal Handling (`SIGTERM`/`SIGINT`)
+## ☠️ 3. Outbox Dead-Letter Queue (DLQ) & Replay Engine
+
+When outbox event processing encounters unhandled exceptions (e.g. temporary downstream service outages or payload parsing errors):
+1. **Retry Increment**: `OutboxRepository.mark_event_failed()` increments `retry_count` and stores `last_error`.
+2. **DLQ Transition**: If `retry_count >= max_retries` (3 attempts), the status automatically transitions to `"DEAD_LETTER"`, preventing poison pills from blocking the processing queue.
+3. **Admin Monitoring & Replay**:
+   - `GET /api/v1/admin/outbox/dead-letter`: Returns all events currently in `DEAD_LETTER` state.
+   - `POST /api/v1/admin/outbox/{event_id}/replay`: Resets status to `"PENDING"`, `retry_count` to `0`, and clears `last_error` so the ARQ worker can re-process the event cleanly.
+
+---
+
+## 🛑 4. Graceful Shutdown & Signal Handling (`SIGTERM`/`SIGINT`)
 
 FastAPI lifespan context (`app/main.py`) intercepts process termination signals to ensure active transactions finish cleanly before Uvicorn exits:
 
@@ -86,3 +100,4 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
     logger.info("Graceful shutdown complete.")
 ```
+

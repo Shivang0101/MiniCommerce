@@ -28,6 +28,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payload_hash VARCHAR(255);"))
         await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"))
         await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;"))
+        await conn.execute(text("ALTER TABLE outbox ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;"))
+        await conn.execute(text("ALTER TABLE outbox ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 3;"))
+        await conn.execute(text("ALTER TABLE outbox ADD COLUMN IF NOT EXISTS last_error TEXT;"))
     
     await init_redis_pool()
     logger.info("MiniCommerce V5 Laboratory Backend initialized successfully.")

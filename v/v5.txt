@@ -161,7 +161,9 @@ Database Engine Tuning (`app/db/session.py`):
 6. Refactored `LoggingMiddleware` for structured JSON logging and separated `/healthz/liveness` & `/healthz/readiness` probes.
 7. Added Keyset pagination (`get_products_keyset`), soft deletion (`soft_delete`), and SHA-256 payload hash verification to `OrderService`.
 8. Built Axios 401 response interceptor in `api.js` and Store Manager Portal UI in `StoreManagerDashboard.jsx`.
-9. Expanded Pytest suite with `test_v5_security.py`, `test_v5_resilience.py`, and `test_v5_data.py` (40 passing tests).
+10. Added SQL CTE (Common Table Expression) & Window Functions (`RANK() OVER ()`, `SUM() OVER ()`) revenue analytics engine (`ProductRepository.get_revenue_window_analytics`) and exposed `GET /api/v1/admin/analytics/revenue`.
+11. Extended Outbox model (`retry_count`, `max_retries`, `last_error`) to implement an Outbox Dead-Letter Queue (DLQ) pattern, automatically transitioning events exceeding max retries to `DEAD_LETTER` state, supported by admin listing (`GET /api/v1/admin/outbox/dead-letter`) and replay (`POST /api/v1/admin/outbox/{event_id}/replay`) endpoints.
+12. Created `tests/test_v5_cte_and_dlq.py` verifying CTE analytics calculation, outbox DLQ failure transitions, and admin replay workflows (43 passing tests).
 
 ================================================================================
 [SECTION 6: ERROR LOG & RESOLUTION TRACKER]
@@ -191,7 +193,7 @@ Database Engine Tuning (`app/db/session.py`):
 [SECTION 7: EXECUTION, TESTING & VERIFICATION COMMANDS]
 ================================================================================
 
-1. Run Full Automated Pytest Suite (40 Tests):
+1. Run Full Automated Pytest Suite (43 Tests):
    .\.venv\Scripts\python -m pytest -v
 
 2. Run V5 Benchmark Comparison:
@@ -203,3 +205,4 @@ Database Engine Tuning (`app/db/session.py`):
 ================================================================================
 END OF SPECIFICATION
 ================================================================================
+

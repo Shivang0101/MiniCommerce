@@ -160,3 +160,68 @@ async def create_admin_user(
     await db.refresh(new_admin)
     logger.info(f"Created new Admin user '{user_in.email}' by {admin.email}")
     return new_admin
+
+
+@admin_router.get("/analytics/revenue")
+async def get_revenue_analytics(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin_user)
+) -> list[dict[str, Any]]:
+    """
+    Executes a SQL CTE (Common Table Expression) combined with Window Functions
+    (RANK() OVER () and SUM() OVER ()) to return catalog revenue ranking and percentage metrics.
+    """
+    from app.repositories.product_repository import ProductRepository
+    return await ProductRepository.get_revenue_window_analytics(db, limit=20)
+
+
+@admin_router.get("/outbox/dead-letter")
+async def get_dead_letter_outbox_events(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin_user)
+) -> list[dict[str, Any]]:
+    """Lists outbox events that failed max retries and transitioned to DEAD_LETTER state."""
+    from app.repositories.outbox_repository import OutboxRepository
+    events = await OutboxRepository.get_dead_letter_events(db, limit=50)
+    return [
+        {
+            "id": str(e.id),
+            "event_type": e.event_type,
+            "payload_json": e.payload_json,
+            "status": e.status,
+            "retry_count": e.retry_count,
+            "max_retries": e.max_retries,
+            "last_error": e.last_error,
+            "created_at": e.created_at.isoformat() if e.created_at else None
+        }
+        for e in events
+    ]
+
+
+@admin_router.post("/outbox/{event_id}/replay")
+async def replay_dead_letter_outbox_event(
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin_user)
+) -> dict[str, Any]:
+    """Replays a DEAD_LETTER outbox event by resetting its status back to PENDING."""
+    import uuid
+    from app.repositories.outbox_repository import OutboxRepository
+
+    try:
+        e_uuid = uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid event UUID format.")
+
+    replayed = await OutboxRepository.replay_dead_letter_event(db, e_uuid)
+    if not replayed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outbox event not found.")
+
+    logger.info(f"Admin '{admin.email}' replayed DEAD_LETTER outbox event '{event_id}'")
+    return {
+        "message": f"Successfully replayed outbox event {event_id}.",
+        "event_id": str(replayed.id),
+        "status": replayed.status,
+        "retry_count": replayed.retry_count
+    }
+

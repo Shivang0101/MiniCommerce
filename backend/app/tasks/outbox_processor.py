@@ -56,6 +56,10 @@ async def process_outbox_events(ctx: dict) -> dict:
                 processed_count += 1
             except Exception as e:
                 logger.error(f"Error processing outbox event {event.id}: {e}")
+                failed_event = await OutboxRepository.mark_event_failed(db, event.id, str(e), max_retries=event.max_retries)
+                if failed_event and failed_event.status == "DEAD_LETTER":
+                    logger.warning(f"Outbox event {event.id} transitioned to DEAD_LETTER status after {failed_event.retry_count} failed retries.")
+
 
     logger.info(f"Outbox Processor completed. Processed {processed_count} events.")
     return {"status": "SUCCESS", "processed_events": processed_count}

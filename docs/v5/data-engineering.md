@@ -50,19 +50,35 @@ payload_hash = hashlib.sha256(f"{user_id}:{cart_repr}".encode('utf-8')).hexdiges
 
 ---
 
-## ⚙️ 4. Connection Pool Tuning
+## 📈 5. SQL CTE & Window Functions Revenue Analytics (`GET /api/v1/admin/analytics/revenue`)
 
-Database sessions in `app/db/session.py` are optimized for high concurrency:
+To deliver analytical insight without degrading OLTP transaction speeds, MiniCommerce V5 utilizes a **Common Table Expression (CTE)** combined with **SQL Window Functions** (`RANK() OVER ()`, `SUM() OVER ()`):
 
-```python
-engine_kwargs.update({
-    "pool_size": 15,
-    "max_overflow": 10,
-    "pool_recycle": 1800,
-    "pool_pre_ping": True
-})
+```sql
+WITH product_sales_cte AS (
+    SELECT 
+        p.id AS product_id,
+        p.name AS product_name,
+        p.price AS price,
+        p.stock AS stock,
+        COALESCE(SUM(oi.quantity), 0) AS units_sold,
+        COALESCE(SUM(oi.quantity * oi.price), 0) AS revenue
+    FROM products p
+    LEFT JOIN order_items oi ON p.id = oi.product_id
+    WHERE p.is_deleted = FALSE
+    GROUP BY p.id, p.name, p.price, p.stock
+)
+SELECT 
+    product_id, product_name, price, stock, units_sold, revenue,
+    RANK() OVER (ORDER BY revenue DESC) AS revenue_rank,
+    SUM(revenue) OVER () AS total_catalog_revenue
+FROM product_sales_cte
+ORDER BY revenue_rank ASC
+LIMIT 20;
 ```
-- `pool_size`: 15 persistent pool connections per Uvicorn worker.
-- `max_overflow`: Up to 10 additional temporary connections during traffic spikes.
-- `pool_recycle`: Recycles connections every 30 minutes to prevent stale socket drops.
-- `pool_pre_ping`: Validates connection health before issuing queries.
+
+### Metrics Produced:
+- `revenue_rank`: Dynamic sales position derived via `RANK() OVER (ORDER BY revenue DESC)`.
+- `total_catalog_revenue`: Total aggregated catalog revenue computed across the dataset via `SUM(revenue) OVER ()`.
+- `revenue_percentage`: Calculated percentage contribution of each product relative to overall catalog revenue.
+

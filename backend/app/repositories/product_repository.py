@@ -150,3 +150,72 @@ class ProductRepository:
         product.stock -= quantity
         return True
 
+    @staticmethod
+    async def get_revenue_window_analytics(db: AsyncSession, limit: int = 20) -> list[dict]:
+        """
+        Executes a CTE (Common Table Expression) combined with SQL Window Functions
+        (RANK() OVER () and SUM() OVER ()) to compute product revenue ranking and percentage contribution.
+        """
+        from app.models.order import OrderItem
+
+        # CTE: Aggregated Product Sales
+        cte = (
+            select(
+                Product.id.label("product_id"),
+                Product.name.label("product_name"),
+                Product.price.label("price"),
+                Product.stock.label("stock"),
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
+                func.coalesce(func.sum(OrderItem.quantity * OrderItem.price), 0).label("revenue")
+            )
+            .outerjoin(OrderItem, Product.id == OrderItem.product_id)
+            .where(Product.is_deleted == False)
+            .group_by(Product.id, Product.name, Product.price, Product.stock)
+            .cte("product_sales_cte")
+        )
+
+        # Window functions applied over CTE
+        revenue_col = cte.c.revenue
+        total_cat_revenue = func.sum(revenue_col).over().label("total_catalog_revenue")
+        rank_col = func.rank().over(order_by=revenue_col.desc()).label("revenue_rank")
+
+        stmt = (
+            select(
+                cte.c.product_id,
+                cte.c.product_name,
+                cte.c.price,
+                cte.c.stock,
+                cte.c.units_sold,
+                cte.c.revenue,
+                rank_col,
+                total_cat_revenue
+            )
+            .order_by(rank_col.asc())
+            .limit(limit)
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        output = []
+        for row in rows:
+            p_id, name, price, stock, units_sold, revenue, revenue_rank, total_catalog_revenue = row
+            rev_float = float(revenue or 0.0)
+            tot_float = float(total_catalog_revenue or 0.0)
+            pct = round((rev_float / tot_float * 100), 2) if tot_float > 0 else 0.0
+
+            output.append({
+                "product_id": str(p_id),
+                "product_name": name,
+                "price": float(price),
+                "stock": stock,
+                "units_sold": int(units_sold),
+                "revenue": rev_float,
+                "revenue_rank": int(revenue_rank),
+                "total_catalog_revenue": tot_float,
+                "revenue_percentage": pct
+            })
+
+        return output
+
+
