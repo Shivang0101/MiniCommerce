@@ -22,43 +22,23 @@ async def lifespan(app: FastAPI):
     # Initialize database schema and V5 runtime column migrations
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(
-            text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;"
-            )
-        )
-        await conn.execute(
-            text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) NOT NULL DEFAULT 'CUSTOMER';"
-            )
-        )
-        await conn.execute(
-            text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);")
-        )
-        await conn.execute(
-            text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payload_hash VARCHAR(255);")
-        )
-        await conn.execute(
-            text(
-                "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"
-            )
-        )
-        await conn.execute(
-            text(
-                "ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;"
-            )
-        )
-        await conn.execute(
-            text(
-                "ALTER TABLE outbox ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;"
-            )
-        )
-        await conn.execute(
-            text(
-                "ALTER TABLE outbox ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 3;"
-            )
-        )
-        await conn.execute(text("ALTER TABLE outbox ADD COLUMN IF NOT EXISTS last_error TEXT;"))
+        if engine.dialect.name == "postgresql":
+            migrations = [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) NOT NULL DEFAULT 'CUSTOMER';",
+                "ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);",
+                "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payload_hash VARCHAR(255);",
+                "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;",
+                "ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;",
+                "ALTER TABLE outbox ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;",
+                "ALTER TABLE outbox ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 3;",
+                "ALTER TABLE outbox ADD COLUMN IF NOT EXISTS last_error TEXT;",
+            ]
+            for stmt in migrations:
+                try:
+                    await conn.execute(text(stmt))
+                except Exception as e:
+                    logger.warning(f"Migration statement ignored: {e}")
 
     await init_redis_pool()
     logger.info("MiniCommerce V5 Laboratory Backend initialized successfully.")
