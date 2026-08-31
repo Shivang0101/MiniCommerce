@@ -1,13 +1,21 @@
-# 🛒 MiniCommerce — Enterprise Security, Distributed Resilience & DevOps Automation (V6)
+# 🛒 MiniCommerce — Enterprise AWS Cloud Architecture, IaC & Distributed Resilience (V7)
 
-Welcome to **MiniCommerce**, an evolving, production-grade backend engineering and system design laboratory. 
+Welcome to **MiniCommerce**, an evolving, production-grade backend engineering, cloud architecture, and system design laboratory. 
 
-MiniCommerce serves as a benchmark laboratory for exploring **high-throughput backend patterns**, **database optimization**, **pessimistic concurrency control**, **in-memory distributed caching**, **asynchronous task offloading**, **sliding-window rate limiting**, **zero-trust dual-token rotation**, **distributed resilience patterns**, **automated CI/CD pipelines**, and **container delivery**.
+MiniCommerce serves as a benchmark laboratory for exploring **Infrastructure as Code (Terraform)**, **AWS Cloud Architecture (VPC, ECS Fargate, RDS PostgreSQL, ElastiCache Redis, ALB)**, **high-throughput backend patterns**, **database optimization**, **pessimistic concurrency control**, **in-memory distributed caching**, **asynchronous task offloading**, **sliding-window rate limiting**, **zero-trust dual-token rotation**, **distributed resilience patterns**, **automated CI/CD pipelines**, and **cloud container delivery**.
 
 ---
 
-## 🚀 Key System Features (Version 6 Current State)
+## 🚀 Key System Features (Version 7 Current State)
 
+- **🏗️ Infrastructure as Code (IaC) via Terraform**: 6 production-grade reusable HCL modules in `terraform/modules/` (`vpc`, `rds`, `elasticache`, `alb`, `ecs`, `iam_and_secrets`) provisioning 59 AWS cloud resources with zero manual click-ops.
+- **🌐 Dual-AZ VPC Network Topology**: Multi-AZ VPC across `us-east-1a` and `us-east-1b` with Public Subnets (ALB, Fargate Tasks), Private App Subnets, and Private Database Subnets (RDS, ElastiCache Redis).
+- **⚖️ AWS Application Load Balancer (ALB)**: High-availability internet-facing ALB routing traffic dynamically via path rules (`/api/*` ➔ Backend Target Group port 8000, `/*` ➔ Frontend Target Group port 80).
+- **🚢 AWS ECS Fargate Container Orchestration**: Serverless container execution for `backend` (FastAPI), `worker` (ARQ Background Task Processor), and `frontend` (Nginx React SPA) with auto-scaling security groups and CloudWatch logging streams.
+- **🐘 AWS RDS PostgreSQL 15 Engine**: Multi-AZ capable database tier running in isolated Private DB subnets with automated daily backups and KMS storage encryption.
+- **⚡ AWS ElastiCache Redis Replication Cluster**: High-speed in-memory cache and ARQ task queue cluster running in Private DB subnets with At-Rest & Transit (TLS) Encryption.
+- **🔐 AWS Secrets Manager Integration**: Dynamic retrieval of database credentials, Redis AUTH tokens, and JWT signing keys via boto3 runtime fetching (`app/core/cloud_secrets.py`).
+- **🌱 Automated 1-Shot Database Seeding**: Automated Fargate 1-shot task execution (`python app/db/seed.py`) seeding admin accounts, users, hardware catalog, and simulated orders directly into live AWS RDS PostgreSQL.
 - **🛠️ Automated Git Pre-Commit Quality Hooks**: `.pre-commit-config.yaml` executing `ruff`, `ruff-format`, `black`, and `detect-secrets` leak scanning before git commits.
 - **⚙️ Centralized Tooling Configuration (`pyproject.toml`)**: Unified quality rules for Ruff, Mypy type-checking, Pytest, and Coverage report generation (`coverage.xml`).
 - **🔄 GitHub Actions CI Pipeline (`ci.yml`)**: Automated Pull Request and `main`/`develop` branch quality gates executing Ruff linting, Mypy static type checking, Bandit AST security scanning, Trivy vulnerability checks, and Pytest with `postgres:15-alpine` and `redis:7-alpine` service containers.
@@ -170,11 +178,19 @@ MiniCommerce strictly enforces a 5-tier separation of concerns across both local
 │  ├─ Soft Delete Architecture & SHA-256 Payload-Hashed Idempotency Engine          │
 │  └─ Store Manager Portal UI & Axios 401 Automatic Token Refresh Interceptor      │
 │                                                                                   │
-│  [VERSION 6] DevOps Automation & CI/CD Pipeline Engineering (Current)             │
+│  [VERSION 6] DevOps Automation & CI/CD Pipeline Engineering                        │
 │  ├─ Git Pre-Commit Hooks (Ruff, Black, Detect-Secrets, YAML/JSON formatters)      │
 │  ├─ Centralized Tool Configuration (pyproject.toml: Ruff, Mypy, Pytest, Cov >= 85%)│
 │  ├─ GitHub Actions CI Pipeline (Linting, Mypy, Bandit, Trivy, Pytest Services)    │
 │  └─ GitHub Actions CD Pipeline (Multi-Stage Docker builds & GHCR delivery)        │
+│                                                                                   │
+│  [VERSION 7] Infrastructure as Code (IaC) & AWS Cloud Architecture (Current)       │
+│  ├─ Terraform Modular HCL (6 Packages: VPC, RDS, ElastiCache, ALB, ECS, Secrets)  │
+│  ├─ Dual-AZ VPC Network (Public Subnets, Private App Subnets, Private DB Subnets) │
+│  ├─ AWS ECS Fargate Orchestration (backend, worker, frontend multi-container)     │
+│  ├─ AWS RDS PostgreSQL 15 & ElastiCache Redis Cluster (TLS Transit Encryption)    │
+│  ├─ AWS Secrets Manager (Dynamic Boto3 secret fetcher in app/core/cloud_secrets.py)│
+│  └─ Automated 1-Shot Fargate Seeding (Seeded Admin, Users, Products to RDS)       │
 │                                                                                   │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -248,9 +264,14 @@ Detailed architectural specifications and experiment logs:
 - **[v/v4.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v4.txt)**: Version 4 Master Specification & Work Log
 - **[v/v5.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v5.txt)**: Version 5 Master Specification & Work Log
 - **[v/v6.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v6.txt)**: Version 6 Master Specification & Work Log
+- **[v/v7.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v7.txt)**: Version 7 Master Specification & Work Log
+- **[docs/v7/aws-cloud-architecture.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v7/aws-cloud-architecture.md)**: Infrastructure as Code & AWS Cloud Architecture Specification
+- **[docs/v7/v7_postmortem_and_troubleshooting.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v7/v7_postmortem_and_troubleshooting.md)**: AWS Deployment Post-Mortem, Log Evidence & Troubleshooting Guide
+- **[docs/v7/terraform_run.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v7/terraform_run.txt)**: Live Terraform Execution & Provisioning Outputs
 - **[docs/v5/security-and-rbac.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/security-and-rbac.md)**: Zero-Trust Security, Token Rotation & Scoped RBAC
 - **[docs/v5/resilience-and-outbox.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/resilience-and-outbox.md)**: Circuit Breakers, Transactional Outbox & Signal Handling
 - **[docs/v5/data-engineering.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/data-engineering.md)**: Keyset Pagination, Soft Deletes & Payload Hashing
 - **[docs/v5/frontend-architecture.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/frontend-architecture.md)**: Store Manager Portal & 401 Interceptor Architecture
 - **[docs/v5/troubleshooting.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/troubleshooting.md)**: Comprehensive V5 Error Log & Resolution Tracker
 - **[docs/v6/devops-and-cicd.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v6/devops-and-cicd.md)**: DevOps Automation, Pre-Commit Hooks & CI/CD Pipeline Architecture
+
