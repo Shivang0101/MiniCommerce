@@ -17,8 +17,8 @@ async def init_redis_pool() -> None:
         redis_pool = ConnectionPool.from_url(
             settings.REDIS_URL,
             decode_responses=True,
-            socket_connect_timeout=0.5,
-            socket_timeout=0.5,
+            socket_connect_timeout=3.0,
+            socket_timeout=3.0,
         )
         redis_client = Redis(connection_pool=redis_pool)
         # Test connection ping
