@@ -85,6 +85,25 @@ Automates git hook execution locally before commits:
 
 ---
 
+## 💡 Architectural & DevOps Insights
+
+### 1. CI vs CD Workflow Separation
+- **CI (`ci.yml`)**: Continuous Integration runs fast quality gates, static type checks, security scans, and Pytest suites on every branch/PR. Does not build or push container images.
+- **CD (`cd.yml`)**: Continuous Delivery runs only on merges to `main` or release tags. Builds production multi-stage Docker images and pushes them to GHCR.
+
+### 2. Multi-Container Package Topology (3 Images)
+- **`minicommerce-frontend`**: Light Nginx Alpine asset server (~20 MB).
+- **`minicommerce-backend`**: FastAPI HTTP API server (Port 8000).
+- **`minicommerce-worker`**: ARQ background worker with 0 open public HTTP ports.
+- **Benefit**: Enables independent auto-scaling (e.g. scaling worker nodes under heavy job queues without duplicating API nodes).
+
+### 3. Image Immutability & Rollback Mechanics
+- Built images are tagged with permanent Git commit SHAs (`:808dd0f`) and `:latest`.
+- Pushing new code uploads a new immutable snapshot and moves the `:latest` tag pointer.
+- Provides 1-second instant rollbacks by reverting server container tag pointers to any previous Git commit SHA image.
+
+---
+
 ## 🛠️ Error Log & Resolution Tracker
 
 1. **`ModuleNotFoundError: No module named 'app'`**
@@ -109,24 +128,31 @@ Automates git hook execution locally before commits:
 
 6. **`GitHub Actions CI Mypy Failures (19 type errors in 8 files)`**
    - *Symptom*: `mypy backend/app` failed in GitHub Actions runner with 19 type checking errors.
-   - *Resolution*: Added explicit type annotations (`list[float]`), non-None return assertions in repositories, explicit type casts (`UUID`, `int`, `Decimal`) in services, `# type: ignore` for Starlette exception handler, and configured `disable_error_code = ["misc"]` with `exclude = ["app/db/.*"]` in `pyproject.toml`.
+   - *Resolution*: Added explicit type annotations (`list[float]`), non-None return assertions in repositories, explicit type casts (`UUID(str(...))`, `int(str(...))`, `Decimal(str(...))`) in services, `# type: ignore[arg-type]` for Starlette exception handler, and configured `disable_error_code = ["misc"]` with `exclude = ["app/db/.*"]` in `pyproject.toml`.
 
 ---
 
-## 🧪 Local Execution Commands
+## 🧪 Local Execution & Operational Commands
 
 ```powershell
 # 1. Run local pre-commit checks on all files
 pre-commit run --all-files
 
-# 2. Run Ruff linter and formatter
+# 2. Bypass local pre-commit hooks temporarily when experimenting
+git commit -m "wip experiment" --no-verify
+
+# 3. Run Ruff linter and formatter
 ruff check backend/app backend/tests
 ruff format --check backend/app backend/tests
 
-# 3. Run Mypy static type checker
-mypy backend/app
+# 4. Run Mypy static type checker
+mypy app
 
-# 4. Run Pytest suite with coverage report enforcement
+# 5. Run Pytest suite with coverage report enforcement
 cd backend
 python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=60
+
+# 6. Operational Server Deployment Commands (Pull newest build from GHCR and restart)
+docker compose pull
+docker compose up -d
 ```

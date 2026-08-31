@@ -1,0 +1,203 @@
+================================================================================
+MINICOMMERCE V7 LABORATORY - MASTER VERSION 7 SPECIFICATION & WORK LOG
+================================================================================
+
+[SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE]
+--------------------------------------------------------------------------------
+Version 7 establishes production-grade Infrastructure as Code (IaC) using Terraform
+and AWS Cloud Architecture for MiniCommerce.
+
+ASCII AWS Cloud Architecture Topology:
++-------------------------------------------------------------------------------+
+|                      MINICOMMERCE V7 AWS CLOUD ARCHITECTURE                    |
++-------------------------------------------------------------------------------+
+
+                               PUBLIC INTERNET
+                                      │
+                                      ▼
+                  +---------------------------------------+
+                  |   AWS Application Load Balancer (ALB) |
+                  |   Public Subnets (AZ-1 & AZ-2)        |
+                  +---------------------------------------+
+                                      │
+              ┌───────────────────────┴───────────────────────┐
+              │ Path: /api/*, /docs, /healthz                 │ Path: /*
+              ▼                                               ▼
++---------------------------+                   +---------------------------+
+| FastAPI Backend Container |                   | Nginx Frontend Container  |
+| Private App Subnets       |                   | Private App Subnets       |
++---------------------------+                   +---------------------------+
+              │                                               │
+              ├───────────────────────┐                       │
+              ▼                       ▼                       │
++---------------------------+   +---------------------------+ │
+| PostgreSQL 15 (RDS)       |   | Redis 7 (ElastiCache)     | │
+| Private DB Subnets        |   | Private DB Subnets        | │
++---------------------------+   +---------------------------+ │
+                                      ▲                       │
+                                      │                       │
+                                +---------------------------+ │
+                                | ARQ Background Worker     |◄┘
+                                | Private App Subnets (0 HTTP)|
+                                +---------------------------+
+
+================================================================================
+[SECTION 2: NEW TECHNOLOGIES & CORE CODE SNIPPETS]
+================================================================================
+
+1. HashiCorp Terraform CLI (HCL):
+   - Modular layout (`terraform/modules/`): `vpc`, `rds`, `elasticache`, `alb`, `ecs`, `iam_and_secrets`.
+
+2. Dynamic AWS Secrets Manager Resolver (`backend/app/core/cloud_secrets.py`):
+```python
+def get_secret(secret_name: str, region_name: str = "us-east-1") -> str | None:
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env not in ("staging", "prod", "production"):
+        return None
+    try:
+        import boto3
+        client = boto3.client("secretsmanager", region_name=region_name)
+        response = client.get_secret_value(SecretId=secret_name)
+        if "SecretString" in response:
+            return response["SecretString"]
+    except Exception as e:
+        logger.warning(f"Unable to fetch AWS secret '{secret_name}': {e}")
+    return None
+```
+
+3. VPC Multi-AZ Network Module (`terraform/modules/vpc/main.tf`):
+```hcl
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+}
+
+resource "aws_subnet" "public" {
+  count                   = length(var.public_subnet_cidrs)
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = var.public_subnet_cidrs[count.index]
+  availability_zone       = var.availability_zones[count.index]
+  map_public_ip_on_launch = true
+}
+```
+
+================================================================================
+[SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS]
+================================================================================
+
+1. AWS SDK Dependency (`backend/requirements.txt`):
+   - Added `boto3>=1.34.0` for runtime secret resolution from AWS Secrets Manager.
+
+2. Application Integration (`backend/app/core/cloud_secrets.py`):
+   - Added `get_secret` utility function fetching encrypted DB & Redis passwords.
+
+3. Architecture Runbook (`docs/v7/aws-cloud-architecture.md`):
+   - Complete operational documentation detailing cloud topology and deployment runbooks.
+
+4. Terraform Run Log (`docs/v7/terraform_run.txt`):
+   - Complete output capture of 59-resource execution plan.
+
+================================================================================
+[SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES]
+================================================================================
+
+Directory Structure Introduced:
+terraform/
+├── environments/
+│   ├── staging/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── terraform.tfvars.example
+│   └── prod/
+└── modules/
+    ├── vpc/
+    ├── rds/
+    ├── elasticache/
+    ├── alb/
+    ├── ecs/
+    └── iam_and_secrets/
+
+================================================================================
+[SECTION 5: STEP-BY-STEP WORK LOG]
+================================================================================
+
+1. Created `explain.txt` guide breaking down IaC, local validation, and AWS safety controls.
+2. Installed CLI prerequisites (`HashiCorp.Terraform` v1.15.8 and `Amazon.AWSCLI` v2.36.33).
+3. Generated AWS Access Keys via IAM Console (`AKIA...` Access Key ID & Secret Access Key).
+4. Configured AWS CLI credentials via `aws configure` (region: `us-east-1`, format: `json`).
+5. Created `terraform/modules/vpc` (VPC, Public/Private subnets, Internet/NAT Gateways).
+6. Created `terraform/modules/rds` (PostgreSQL 15 Multi-AZ, KMS encryption, DB subnet group).
+7. Created `terraform/modules/elasticache` (Redis 7 cluster, TLS Transit/At-Rest encryption).
+8. Created `terraform/modules/alb` (Application Load Balancer, target groups, path routing).
+9. Created `terraform/modules/ecs` (ECS Fargate cluster, task definitions, Target Tracking Auto-Scaling).
+10. Created `terraform/modules/iam_and_secrets` (IAM execution/task roles & Secrets Manager).
+11. Created `terraform/environments/staging` root configuration layout.
+12. Created `backend/app/core/cloud_secrets.py` and updated `backend/requirements.txt`.
+13. Formatted all HCL code (`terraform fmt -recursive terraform/`).
+14. Initialized provider plugins (`terraform init -backend=false` in staging).
+15. Successfully validated configuration (`terraform validate` -> `Success! The configuration is valid.`).
+16. Executed dry-run execution plan (`terraform plan`) generating 59 AWS resources to add.
+17. Saved full plan output to `docs/v7/terraform_run.txt`.
+18. Executed full Pytest backend test suite (`43/43 passed in 29.79s`).
+
+================================================================================
+[SECTION 6: ERROR LOG & RESOLUTION TRACKER]
+================================================================================
+
+1. Error: `ModuleNotFoundError: No module named 'arq'`
+   Symptom: `python -m pytest tests` failed when run with system Python.
+   Root Cause: System python interpreter lacked local virtual environment packages.
+   Solution: Invoked pytest using virtual environment binary: `.\.venv\Scripts\python.exe -m pytest tests`.
+
+2. Error: `Error: No valid credential sources found`
+   Symptom: `terraform plan` failed with `failed to refresh cached credentials` error.
+   Root Cause: AWS CLI credentials (`aws configure`) were not yet configured locally.
+   Solution: Generated Access Key ID & Secret Access Key in AWS IAM Console and executed `aws configure`.
+
+================================================================================
+[SECTION 7: COMPLETE STEP-BY-STEP EXECUTION & SETUP GUIDE]
+================================================================================
+
+STEP 1: INSTALL TOOL PREREQUISITES (PowerShell):
+   winget install HashiCorp.Terraform
+   winget install Amazon.AWSCLI
+
+STEP 2: GENERATE AWS ACCESS KEYS (AWS Web Console):
+   1. Log into AWS Console (https://aws.amazon.com) -> Go to IAM service.
+   2. Select Users -> Create User (e.g. `developer-cli`) -> Attach `AdministratorAccess` policy.
+   3. Go to Security Credentials tab -> Create Access Key -> Select CLI.
+   4. Copy Access Key ID (AKIA...) and Secret Access Key.
+
+STEP 3: CONFIGURE AWS CLI (PowerShell):
+   aws configure
+   - AWS Access Key ID: <paste AKIA...>
+   - AWS Secret Access Key: <paste secret key>
+   - Default region name: us-east-1
+   - Default output format: json
+
+STEP 4: LOCAL TERRAFORM INITIALIZATION & VALIDATION (0 AWS Cost):
+   cd terraform/environments/staging
+   terraform init -backend=false
+   terraform validate
+
+STEP 5: DRY-RUN EXECUTION PLAN (0 AWS Cost, Read-Only):
+   cd terraform/environments/staging
+   terraform plan
+
+STEP 6: APPLY LIVE AWS DEPLOYMENT (Optional):
+   cd terraform/environments/staging
+   terraform apply
+
+STEP 7: DESTROY AWS DEPLOYMENT (Clean Teardown):
+   cd terraform/environments/staging
+   terraform destroy
+
+STEP 8: BACKEND UNIT TEST SUITE:
+   cd backend
+   .\.venv\Scripts\python.exe -m pytest tests
+
+================================================================================
+END OF SPECIFICATION
+================================================================================

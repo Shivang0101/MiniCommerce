@@ -1,0 +1,7 @@
+# MiniCommerce Staging Terraform Variables Example
+
+aws_region       = "us-east-1"
+environment      = "staging"
+db_password      = "StagingSecurePass123!"
+redis_auth_token = "StagingRedisSecretKey99!"
+jwt_secret       = "SuperSecretStagingJWTKey2026!"
