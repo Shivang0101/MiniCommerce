@@ -80,7 +80,7 @@ app = FastAPI(
 
 
 # Exception handlers
-app.add_exception_handler(HTTPException, api_exception_handler)
+app.add_exception_handler(HTTPException, api_exception_handler)  # type: ignore[arg-type]
 
 # Custom Middlewares
 app.add_middleware(RateLimiterMiddleware)

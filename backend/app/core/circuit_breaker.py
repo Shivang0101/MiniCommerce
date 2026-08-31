@@ -32,8 +32,8 @@ class CircuitBreaker:
         self.min_requests = min_requests
 
         self.state = CircuitState.CLOSED
-        self.failures = []
-        self.successes = []
+        self.failures: list[float] = []
+        self.successes: list[float] = []
         self.last_state_change = time.time()
         self._lock = asyncio.Lock()
 

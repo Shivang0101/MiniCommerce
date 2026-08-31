@@ -112,9 +112,9 @@ class OrderService:
                 await OrderRepository.add_order_item(
                     db,
                     order_id=order.id,
-                    product_id=item_data["product_id"],
-                    quantity=item_data["quantity"],
-                    price=item_data["price"],
+                    product_id=uuid.UUID(str(item_data["product_id"])),
+                    quantity=int(str(item_data["quantity"])),
+                    price=Decimal(str(item_data["price"])),
                 )
 
             # 6. Clear Cart Items

@@ -27,6 +27,7 @@ class CartRepository:
             await db.commit()
             await db.refresh(cart)
             cart = await CartRepository.get_by_user_id(db, user_id)
+        assert cart is not None
         return cart
 
     @staticmethod
@@ -60,7 +61,9 @@ class CartRepository:
             item = CartItem(cart_id=cart_id, product_id=product_id, quantity=quantity)
             db.add(item)
         await db.commit()
-        return await CartRepository.get_item_by_id(db, item.id)
+        ret_item = await CartRepository.get_item_by_id(db, item.id)
+        assert ret_item is not None
+        return ret_item
 
     @staticmethod
     async def update_item_quantity(

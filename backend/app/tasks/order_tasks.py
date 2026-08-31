@@ -86,8 +86,9 @@ async def audit_low_stock(
                 )
 
                 # Push low stock notification to admin / general inbox
+                prod_id_str = str(prod_id or "")
                 alert_notif = {
-                    "id": f"alert_{prod_id[:8]}",
+                    "id": f"alert_{prod_id_str[:8]}",
                     "type": "STOCK_ALERT",
                     "title": "Low Stock Warning",
                     "message": f"'{prod_name}' has only {remaining_stock} units left in stock!",
