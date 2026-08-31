@@ -1,14 +1,13 @@
-import pytest
-import uuid
 from decimal import Decimal
+
+import pytest
+from app.core.security import create_access_token
+from app.models.user import ROLE_SCOPES, User
+from app.repositories.outbox_repository import OutboxRepository
+from app.repositories.product_repository import ProductRepository
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.user import User, ROLE_SCOPES
 
-from app.models.product import Product
-from app.repositories.product_repository import ProductRepository
-from app.repositories.outbox_repository import OutboxRepository
-from app.core.security import create_access_token
 
 @pytest.mark.asyncio
 async def test_cte_window_functions_revenue_analytics(db_session: AsyncSession):
@@ -16,16 +15,34 @@ async def test_cte_window_functions_revenue_analytics(db_session: AsyncSession):
     # 1. Create test products
     p1 = await ProductRepository.create(
         db_session,
-        type("ProductIn", (), {"name": "Laptop Pro", "description": "High end", "price": Decimal("1000.00"), "stock": 10})
+        type(
+            "ProductIn",
+            (),
+            {
+                "name": "Laptop Pro",
+                "description": "High end",
+                "price": Decimal("1000.00"),
+                "stock": 10,
+            },
+        ),
     )
     p2 = await ProductRepository.create(
         db_session,
-        type("ProductIn", (), {"name": "Wireless Mouse", "description": "Ergonomic", "price": Decimal("50.00"), "stock": 50})
+        type(
+            "ProductIn",
+            (),
+            {
+                "name": "Wireless Mouse",
+                "description": "Ergonomic",
+                "price": Decimal("50.00"),
+                "stock": 50,
+            },
+        ),
     )
 
     # 2. Execute CTE & Window Function analytics
     analytics = await ProductRepository.get_revenue_window_analytics(db_session)
-    
+
     assert len(analytics) >= 2
     # Verify key attributes exist in response
     first_item = analytics[0]
@@ -49,17 +66,23 @@ async def test_outbox_dlq_transition_and_replay(db_session: AsyncSession):
     assert event.retry_count == 0
 
     # 2. Mark event as failed 2 times (should become FAILED)
-    ev1 = await OutboxRepository.mark_event_failed(db_session, event.id, "Connection timeout error 1", max_retries=3)
+    ev1 = await OutboxRepository.mark_event_failed(
+        db_session, event.id, "Connection timeout error 1", max_retries=3
+    )
     assert ev1.retry_count == 1
     assert ev1.status == "FAILED"
     assert "Connection timeout" in ev1.last_error
 
-    ev2 = await OutboxRepository.mark_event_failed(db_session, event.id, "Connection timeout error 2", max_retries=3)
+    ev2 = await OutboxRepository.mark_event_failed(
+        db_session, event.id, "Connection timeout error 2", max_retries=3
+    )
     assert ev2.retry_count == 2
     assert ev2.status == "FAILED"
 
     # 3. Third failure (should transition to DEAD_LETTER)
-    ev3 = await OutboxRepository.mark_event_failed(db_session, event.id, "Connection timeout error 3", max_retries=3)
+    ev3 = await OutboxRepository.mark_event_failed(
+        db_session, event.id, "Connection timeout error 3", max_retries=3
+    )
     assert ev3.retry_count == 3
     assert ev3.status == "DEAD_LETTER"
 
@@ -79,10 +102,7 @@ async def test_admin_analytics_and_dlq_endpoints(client: AsyncClient, db_session
     """Test Admin API endpoints for CTE revenue analytics and DLQ event replay."""
     # 1. Create admin user & generate token
     admin_user = User(
-        email="dlq_admin@example.com",
-        password_hash="hashed_pw",
-        is_admin=True,
-        role="SRE_ADMIN"
+        email="dlq_admin@example.com", password_hash="hashed_pw", is_admin=True, role="SRE_ADMIN"
     )
     db_session.add(admin_user)
     await db_session.commit()
@@ -90,7 +110,6 @@ async def test_admin_analytics_and_dlq_endpoints(client: AsyncClient, db_session
 
     admin_token = create_access_token(subject=admin_user.id, scopes=ROLE_SCOPES["SRE_ADMIN"])
     headers = {"Authorization": f"Bearer {admin_token}"}
-
 
     # 2. Test GET /api/v1/admin/analytics/revenue
     res = await client.get("/api/v1/admin/analytics/revenue", headers=headers)

@@ -1,18 +1,18 @@
-import time
 import json
 import logging
+import time
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
-from app.api.deps import get_db, get_current_admin_user
-from app.models.user import User
-from app.models.order import Order
-from app.schemas.user import UserResponse, AdminUserCreate
+from app.api.deps import get_current_admin_user, get_db
+from app.core.redis import get_redis
 from app.core.security import hash_password
-from app.core.redis import get_redis, get_arq_pool
+from app.models.order import Order
+from app.models.user import User
+from app.schemas.user import AdminUserCreate, UserResponse
 from app.services.trace_service import TraceService
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,11 @@ admin_router = APIRouter(prefix="/admin", tags=["Admin Observability"])
 
 @admin_router.get("/metrics")
 async def get_admin_metrics(
-    db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin_user)
 ) -> dict[str, Any]:
     redis = get_redis()
     now = time.time()
-    
+
     # 1. Active Users in last 15 mins (900s)
     active_users_count = 0
     if redis:
@@ -60,7 +59,7 @@ async def get_admin_metrics(
     recent_traces = await TraceService.list_recent_traces(20)
     durations = [t["total_duration_ms"] for t in recent_traces if "total_duration_ms" in t]
     durations.sort()
-    
+
     p95_latency = 0.0
     if durations:
         idx = int(len(durations) * 0.95)
@@ -88,14 +87,12 @@ async def get_admin_metrics(
         "queue_in_flight": queue_jobs_count,
         "completed_jobs": completed_jobs_count,
         "cache_hit_percent": cache_hit_ratio,
-        "server_time": time.time()
+        "server_time": time.time(),
     }
 
 
 @admin_router.get("/queue-health")
-async def get_queue_health(
-    admin: User = Depends(get_current_admin_user)
-) -> dict[str, Any]:
+async def get_queue_health(admin: User = Depends(get_current_admin_user)) -> dict[str, Any]:
     redis = get_redis()
     job_logs = []
     if redis:
@@ -105,17 +102,11 @@ async def get_queue_health(
         except Exception:
             pass
 
-    return {
-        "status": "healthy",
-        "queue_name": "arq:queue",
-        "recent_job_logs": job_logs
-    }
+    return {"status": "healthy", "queue_name": "arq:queue", "recent_job_logs": job_logs}
 
 
 @admin_router.get("/live-logs")
-async def get_live_logs(
-    admin: User = Depends(get_current_admin_user)
-) -> list[dict[str, Any]]:
+async def get_live_logs(admin: User = Depends(get_current_admin_user)) -> list[dict[str, Any]]:
     redis = get_redis()
     if not redis:
         return []
@@ -127,9 +118,7 @@ async def get_live_logs(
 
 
 @admin_router.get("/traces")
-async def get_traces(
-    admin: User = Depends(get_current_admin_user)
-) -> list[dict[str, Any]]:
+async def get_traces(admin: User = Depends(get_current_admin_user)) -> list[dict[str, Any]]:
     return await TraceService.list_recent_traces(30)
 
 
@@ -137,7 +126,7 @@ async def get_traces(
 async def create_admin_user(
     user_in: AdminUserCreate,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user)
+    admin: User = Depends(get_current_admin_user),
 ):
     """Allow an authenticated Admin user to create or promote another Admin user."""
     res = await db.execute(select(User).where(User.email == user_in.email))
@@ -153,7 +142,7 @@ async def create_admin_user(
     new_admin = User(
         email=user_in.email,
         password_hash=hash_password(user_in.password),
-        is_admin=user_in.is_admin
+        is_admin=user_in.is_admin,
     )
     db.add(new_admin)
     await db.commit()
@@ -164,24 +153,24 @@ async def create_admin_user(
 
 @admin_router.get("/analytics/revenue")
 async def get_revenue_analytics(
-    db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin_user)
 ) -> list[dict[str, Any]]:
     """
     Executes a SQL CTE (Common Table Expression) combined with Window Functions
     (RANK() OVER () and SUM() OVER ()) to return catalog revenue ranking and percentage metrics.
     """
     from app.repositories.product_repository import ProductRepository
+
     return await ProductRepository.get_revenue_window_analytics(db, limit=20)
 
 
 @admin_router.get("/outbox/dead-letter")
 async def get_dead_letter_outbox_events(
-    db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin_user)
 ) -> list[dict[str, Any]]:
     """Lists outbox events that failed max retries and transitioned to DEAD_LETTER state."""
     from app.repositories.outbox_repository import OutboxRepository
+
     events = await OutboxRepository.get_dead_letter_events(db, limit=50)
     return [
         {
@@ -192,7 +181,7 @@ async def get_dead_letter_outbox_events(
             "retry_count": e.retry_count,
             "max_retries": e.max_retries,
             "last_error": e.last_error,
-            "created_at": e.created_at.isoformat() if e.created_at else None
+            "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in events
     ]
@@ -200,18 +189,19 @@ async def get_dead_letter_outbox_events(
 
 @admin_router.post("/outbox/{event_id}/replay")
 async def replay_dead_letter_outbox_event(
-    event_id: str,
-    db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin_user)
+    event_id: str, db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin_user)
 ) -> dict[str, Any]:
     """Replays a DEAD_LETTER outbox event by resetting its status back to PENDING."""
     import uuid
+
     from app.repositories.outbox_repository import OutboxRepository
 
     try:
         e_uuid = uuid.UUID(event_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid event UUID format.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid event UUID format."
+        )
 
     replayed = await OutboxRepository.replay_dead_letter_event(db, e_uuid)
     if not replayed:
@@ -222,6 +212,5 @@ async def replay_dead_letter_outbox_event(
         "message": f"Successfully replayed outbox event {event_id}.",
         "event_id": str(replayed.id),
         "status": replayed.status,
-        "retry_count": replayed.retry_count
+        "retry_count": replayed.retry_count,
     }
-

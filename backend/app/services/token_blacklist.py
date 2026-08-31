@@ -1,7 +1,9 @@
 import logging
+
 from app.core.redis import get_redis
 
 logger = logging.getLogger(__name__)
+
 
 class TokenBlacklistService:
     @staticmethod

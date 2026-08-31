@@ -1,16 +1,18 @@
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Sequence
-from sqlalchemy import select, func, asc, desc
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.product import Product
 from app.schemas.product import ProductCreate
+from sqlalchemy import asc, desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from datetime import datetime, timezone
 
 class ProductRepository:
     @staticmethod
-    async def get_by_id(db: AsyncSession, product_id: uuid.UUID, include_deleted: bool = False) -> Product | None:
+    async def get_by_id(
+        db: AsyncSession, product_id: uuid.UUID, include_deleted: bool = False
+    ) -> Product | None:
         stmt = select(Product).where(Product.id == product_id)
         if not include_deleted:
             stmt = stmt.where(Product.is_deleted == False)
@@ -28,7 +30,7 @@ class ProductRepository:
         sort_order: str = "asc",
         search: str | None = None,
         category: str | None = None,
-        include_deleted: bool = False
+        include_deleted: bool = False,
     ) -> tuple[list[Product], int]:
         stmt = select(Product)
         if not include_deleted:
@@ -63,7 +65,7 @@ class ProductRepository:
             "name": Product.name,
             "price": Product.price,
             "created_at": Product.created_at,
-            "stock": Product.stock
+            "stock": Product.stock,
         }
         sort_column = valid_sort_fields.get(sort_by.lower(), Product.name)
         direction = desc if sort_order.lower() == "desc" else asc
@@ -81,9 +83,7 @@ class ProductRepository:
 
     @staticmethod
     async def get_products_keyset(
-        db: AsyncSession,
-        last_seen_id: uuid.UUID | None = None,
-        limit: int = 20
+        db: AsyncSession, last_seen_id: uuid.UUID | None = None, limit: int = 20
     ) -> list[Product]:
         """
         Keyset (cursor-based) pagination avoiding deep OFFSET scan overhead.
@@ -97,14 +97,16 @@ class ProductRepository:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_by_ids_for_update(db: AsyncSession, product_ids: list[uuid.UUID]) -> list[Product]:
+    async def get_by_ids_for_update(
+        db: AsyncSession, product_ids: list[uuid.UUID]
+    ) -> list[Product]:
         """
         Fetch products by IDs using row-level locking (SELECT ... FOR UPDATE).
         Orders by Product.id ASC deterministically to prevent deadlocks during concurrent checkouts.
         """
         if not product_ids:
             return []
-        
+
         # Sort IDs to enforce deterministic locking order
         sorted_ids = sorted(product_ids)
 
@@ -124,7 +126,7 @@ class ProductRepository:
             name=product_in.name,
             description=product_in.description,
             price=product_in.price,
-            stock=product_in.stock
+            stock=product_in.stock,
         )
         db.add(product)
         await db.commit()
@@ -138,7 +140,7 @@ class ProductRepository:
         if not product or product.is_deleted:
             return False
         product.is_deleted = True
-        product.deleted_at = datetime.now(timezone.utc)
+        product.deleted_at = datetime.now(UTC)
         await db.commit()
         return True
 
@@ -166,7 +168,7 @@ class ProductRepository:
                 Product.price.label("price"),
                 Product.stock.label("stock"),
                 func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
-                func.coalesce(func.sum(OrderItem.quantity * OrderItem.price), 0).label("revenue")
+                func.coalesce(func.sum(OrderItem.quantity * OrderItem.price), 0).label("revenue"),
             )
             .outerjoin(OrderItem, Product.id == OrderItem.product_id)
             .where(Product.is_deleted == False)
@@ -188,7 +190,7 @@ class ProductRepository:
                 cte.c.units_sold,
                 cte.c.revenue,
                 rank_col,
-                total_cat_revenue
+                total_cat_revenue,
             )
             .order_by(rank_col.asc())
             .limit(limit)
@@ -204,18 +206,18 @@ class ProductRepository:
             tot_float = float(total_catalog_revenue or 0.0)
             pct = round((rev_float / tot_float * 100), 2) if tot_float > 0 else 0.0
 
-            output.append({
-                "product_id": str(p_id),
-                "product_name": name,
-                "price": float(price),
-                "stock": stock,
-                "units_sold": int(units_sold),
-                "revenue": rev_float,
-                "revenue_rank": int(revenue_rank),
-                "total_catalog_revenue": tot_float,
-                "revenue_percentage": pct
-            })
+            output.append(
+                {
+                    "product_id": str(p_id),
+                    "product_name": name,
+                    "price": float(price),
+                    "stock": stock,
+                    "units_sold": int(units_sold),
+                    "revenue": rev_float,
+                    "revenue_rank": int(revenue_rank),
+                    "total_catalog_revenue": tot_float,
+                    "revenue_percentage": pct,
+                }
+            )
 
         return output
-
-

@@ -1,19 +1,28 @@
-import time
 import logging
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
-from fastapi import Request, status
+import time
+
 from app.core.config import settings
 from app.core.redis import get_redis
 from app.core.security import decode_access_token
+from fastapi import Request, status
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Exclude documentation, OpenAPI schema, and health probes from rate limiting
         path = request.url.path
-        if path in ["/docs", "/redoc", "/openapi.json", "/", "/healthz", "/readyz"] or path.startswith("/assets/"):
+        if path in [
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/",
+            "/healthz",
+            "/readyz",
+        ] or path.startswith("/assets/"):
             return await call_next(request)
 
         redis = get_redis()
@@ -54,7 +63,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             pipe.zcard(key)
             pipe.expire(key, window_seconds + 5)
             results = await pipe.execute()
-            
+
             request_count = results[2]
             remaining = max(0, limit - request_count)
 
@@ -64,21 +73,23 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                 await redis.zadd("active_users", {user_uuid: now})
 
             if request_count > limit:
-                logger.warning(f"Rate limit exceeded for client '{client_id}' on path '{path}' ({request_count}/{limit})")
+                logger.warning(
+                    f"Rate limit exceeded for client '{client_id}' on path '{path}' ({request_count}/{limit})"
+                )
                 retry_after = 14  # estimated window cooldown
                 return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     content={
                         "error": "Too Many Requests",
                         "detail": f"Rate limit exceeded ({limit} requests per minute). Please try again in {retry_after} seconds.",
-                        "retry_after_seconds": retry_after
+                        "retry_after_seconds": retry_after,
                     },
                     headers={
                         "Retry-After": str(retry_after),
                         "X-RateLimit-Limit": str(limit),
                         "X-RateLimit-Remaining": "0",
-                        "X-RateLimit-Reset": str(int(now + retry_after))
-                    }
+                        "X-RateLimit-Reset": str(int(now + retry_after)),
+                    },
                 )
 
             response = await call_next(request)

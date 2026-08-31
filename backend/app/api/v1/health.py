@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
 from app.api.deps import get_db
 from app.core.redis import get_redis
+from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 health_router = APIRouter(tags=["Health"])
 
@@ -49,7 +49,6 @@ async def readiness_probe(response: Response, db: AsyncSession = Depends(get_db)
         "status": "ready" if all_healthy else "unready",
         "dependencies": {
             "database": "connected" if db_ok else "unreachable",
-            "redis": "connected" if redis_ok else "unreachable"
-        }
+            "redis": "connected" if redis_ok else "unreachable",
+        },
     }
-

@@ -1,8 +1,9 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.services.cache_service import CacheService
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.mark.asyncio

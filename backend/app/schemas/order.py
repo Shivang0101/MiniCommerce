@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict
+
 from app.schemas.product import ProductResponse
+from pydantic import BaseModel, ConfigDict
+
 
 class OrderItemResponse(BaseModel):
     id: uuid.UUID
@@ -13,6 +15,7 @@ class OrderItemResponse(BaseModel):
     product: ProductResponse | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class OrderResponse(BaseModel):
     id: uuid.UUID

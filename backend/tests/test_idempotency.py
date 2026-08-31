@@ -1,29 +1,33 @@
-import pytest
 from decimal import Decimal
+
+import pytest
+from app.core.security import create_access_token
+from app.repositories.cart_repository import CartRepository
+from app.repositories.product_repository import ProductRepository
+from app.repositories.user_repository import UserRepository
+from app.schemas.product import ProductCreate
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.repositories.user_repository import UserRepository
-from app.repositories.product_repository import ProductRepository
-from app.repositories.cart_repository import CartRepository
-from app.schemas.product import ProductCreate
-from app.core.security import create_access_token
+
 
 @pytest.mark.asyncio
-async def test_idempotency_key_prevents_duplicate_orders(client: AsyncClient, db_session: AsyncSession):
+async def test_idempotency_key_prevents_duplicate_orders(
+    client: AsyncClient, db_session: AsyncSession
+):
     # 1. Setup user & product
     user = await UserRepository.create(db_session, "idemp_user@test.com", "hash")
-    product = await ProductRepository.create(db_session, ProductCreate(name="Limited Item", description="Desc", price=Decimal("100.00"), stock=5))
-    
+    product = await ProductRepository.create(
+        db_session,
+        ProductCreate(name="Limited Item", description="Desc", price=Decimal("100.00"), stock=5),
+    )
+
     # 2. Add product to cart
     cart = await CartRepository.get_or_create_by_user_id(db_session, user.id)
     await CartRepository.add_item(db_session, cart.id, product.id, 2)
     await db_session.commit()
 
     token = create_access_token(user.id)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Idempotency-Key": "test_idempotency_key_001"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "test_idempotency_key_001"}
 
     # 3. First checkout request
     res1 = await client.post("/api/v1/orders", headers=headers)

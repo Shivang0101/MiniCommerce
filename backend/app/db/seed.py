@@ -1,15 +1,15 @@
 import asyncio
 import sys
-from pathlib import Path
 from decimal import Decimal
+from pathlib import Path
 
 # Ensure backend root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from sqlalchemy import select
-from app.db.session import AsyncSessionLocal, engine
-from app.db.base import Base, User, Product, Cart, CartItem, Order, OrderItem
 from app.core.security import hash_password
+from app.db.base import Base, Cart, CartItem, Order, OrderItem, Product, User
+from app.db.session import AsyncSessionLocal, engine
+from sqlalchemy import select
 
 SEED_USERS = [
     {"email": "admin@minicommerce.com", "password": "Admin@123456", "is_admin": True},
@@ -19,17 +19,68 @@ SEED_USERS = [
 ]
 
 SEED_PRODUCTS = [
-    {"name": "Mechanical Keyboard", "description": "Tactile mechanical switches with RGB backlighting.", "price": Decimal("120.00"), "stock": 15},
-    {"name": "Wireless Ergonomic Mouse", "description": "Ergonomic vertical design for wrist strain reduction.", "price": Decimal("65.50"), "stock": 30},
-    {"name": "UltraWide Monitor 34\"", "description": "34-inch curved ultrawide monitor with 144Hz refresh rate.", "price": Decimal("499.99"), "stock": 8},
-    {"name": "USB-C Multi-Port Hub", "description": "7-in-1 USB-C hub with 4K HDMI, USB 3.0, and PD charging.", "price": Decimal("45.00"), "stock": 50},
-    {"name": "Noise-Cancelling Headphones", "description": "Active noise cancelling wireless over-ear headphones.", "price": Decimal("199.99"), "stock": 20},
-    {"name": "Laptop Stand Aluminum", "description": "Adjustable aluminum ergonomic laptop riser.", "price": Decimal("39.95"), "stock": 40},
-    {"name": "Desk Mat Large", "description": "Water-resistant large felt desk pad.", "price": Decimal("24.99"), "stock": 100},
-    {"name": "HD Webcam 1080p", "description": "Full HD 1080p webcam with auto light correction and mic.", "price": Decimal("79.99"), "stock": 25},
-    {"name": "Studio Condenser Microphone", "description": "Cardioid USB condenser mic with pop filter and boom arm.", "price": Decimal("110.00"), "stock": 12},
-    {"name": "Smart LED Desk Lamp", "description": "Dimmable LED lamp with wireless phone charging base.", "price": Decimal("49.99"), "stock": 3},
+    {
+        "name": "Mechanical Keyboard",
+        "description": "Tactile mechanical switches with RGB backlighting.",
+        "price": Decimal("120.00"),
+        "stock": 15,
+    },
+    {
+        "name": "Wireless Ergonomic Mouse",
+        "description": "Ergonomic vertical design for wrist strain reduction.",
+        "price": Decimal("65.50"),
+        "stock": 30,
+    },
+    {
+        "name": 'UltraWide Monitor 34"',
+        "description": "34-inch curved ultrawide monitor with 144Hz refresh rate.",
+        "price": Decimal("499.99"),
+        "stock": 8,
+    },
+    {
+        "name": "USB-C Multi-Port Hub",
+        "description": "7-in-1 USB-C hub with 4K HDMI, USB 3.0, and PD charging.",
+        "price": Decimal("45.00"),
+        "stock": 50,
+    },
+    {
+        "name": "Noise-Cancelling Headphones",
+        "description": "Active noise cancelling wireless over-ear headphones.",
+        "price": Decimal("199.99"),
+        "stock": 20,
+    },
+    {
+        "name": "Laptop Stand Aluminum",
+        "description": "Adjustable aluminum ergonomic laptop riser.",
+        "price": Decimal("39.95"),
+        "stock": 40,
+    },
+    {
+        "name": "Desk Mat Large",
+        "description": "Water-resistant large felt desk pad.",
+        "price": Decimal("24.99"),
+        "stock": 100,
+    },
+    {
+        "name": "HD Webcam 1080p",
+        "description": "Full HD 1080p webcam with auto light correction and mic.",
+        "price": Decimal("79.99"),
+        "stock": 25,
+    },
+    {
+        "name": "Studio Condenser Microphone",
+        "description": "Cardioid USB condenser mic with pop filter and boom arm.",
+        "price": Decimal("110.00"),
+        "stock": 12,
+    },
+    {
+        "name": "Smart LED Desk Lamp",
+        "description": "Dimmable LED lamp with wireless phone charging base.",
+        "price": Decimal("49.99"),
+        "stock": 3,
+    },
 ]
+
 
 async def seed_data():
     print("Starting database schema creation and seeding...")
@@ -46,7 +97,7 @@ async def seed_data():
                 user = User(
                     email=user_data["email"],
                     password_hash=hash_password(user_data["password"]),
-                    is_admin=user_data.get("is_admin", False)
+                    is_admin=user_data.get("is_admin", False),
                 )
                 session.add(user)
                 await session.flush()
@@ -68,7 +119,7 @@ async def seed_data():
                     name=prod_data["name"],
                     description=prod_data["description"],
                     price=prod_data["price"],
-                    stock=prod_data["stock"]
+                    stock=prod_data["stock"],
                 )
                 session.add(product)
                 await session.flush()
@@ -99,28 +150,22 @@ async def seed_data():
             order_res = await session.execute(select(Order).where(Order.user_id == bob.id))
             bob_order = order_res.scalar_one_or_none()
             if not bob_order:
-                monitor = prod_map.get("UltraWide Monitor 34\"")
+                monitor = prod_map.get('UltraWide Monitor 34"')
                 if monitor:
                     total_amount = Decimal(str(monitor.price))
-                    order = Order(
-                        user_id=bob.id,
-                        status="CONFIRMED",
-                        total_amount=total_amount
-                    )
+                    order = Order(user_id=bob.id, status="CONFIRMED", total_amount=total_amount)
                     session.add(order)
                     await session.flush()
 
                     order_item = OrderItem(
-                        order_id=order.id,
-                        product_id=monitor.id,
-                        quantity=1,
-                        price=monitor.price
+                        order_id=order.id, product_id=monitor.id, quantity=1, price=monitor.price
                     )
                     session.add(order_item)
                     print(f"Seeded simulated order #{str(order.id)[:8]} for Bob")
 
         await session.commit()
     print("Database seeding completed successfully.")
+
 
 if __name__ == "__main__":
     asyncio.run(seed_data())

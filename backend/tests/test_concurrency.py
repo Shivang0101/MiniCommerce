@@ -1,23 +1,29 @@
-import pytest
 from decimal import Decimal
+
+import pytest
+from app.core.security import create_access_token
+from app.repositories.cart_repository import CartRepository
+from app.repositories.product_repository import ProductRepository
+from app.repositories.user_repository import UserRepository
+from app.schemas.product import ProductCreate
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.repositories.user_repository import UserRepository
-from app.repositories.product_repository import ProductRepository
-from app.repositories.cart_repository import CartRepository
-from app.schemas.product import ProductCreate
-from app.core.security import create_access_token
+
 
 @pytest.mark.asyncio
-async def test_concurrent_checkout_prevents_overselling(client: AsyncClient, db_session: AsyncSession):
+async def test_concurrent_checkout_prevents_overselling(
+    client: AsyncClient, db_session: AsyncSession
+):
     # 1. Create 2 test users
     user_a = await UserRepository.create(db_session, "user_a@concurrency.com", "hash")
     user_b = await UserRepository.create(db_session, "user_b@concurrency.com", "hash")
 
     # 2. Create product with stock = 1
     product = await ProductRepository.create(
-        db_session, 
-        ProductCreate(name="Scarce Item", description="Only 1 left", price=Decimal("250.00"), stock=1)
+        db_session,
+        ProductCreate(
+            name="Scarce Item", description="Only 1 left", price=Decimal("250.00"), stock=1
+        ),
     )
 
     # 3. Populate cart for User A (qty 1) and User B (qty 1)

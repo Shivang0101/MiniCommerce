@@ -1,15 +1,19 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, EmailStr
+
 
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     role: str = "CUSTOMER"
 
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
 
 class UserResponse(BaseModel):
     id: uuid.UUID
@@ -20,14 +24,15 @@ class UserResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class AdminUserCreate(BaseModel):
     email: EmailStr
     password: str
     is_admin: bool = True
     role: str = "SRE_ADMIN"
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     refresh_token: str | None = None
-

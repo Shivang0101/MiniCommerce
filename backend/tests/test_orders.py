@@ -1,11 +1,15 @@
 import pytest
 from httpx import AsyncClient
 
+
 async def get_auth_headers(client: AsyncClient, email: str) -> dict:
     await client.post("/api/v1/auth/register", json={"email": email, "password": "Password123!"})
-    login_res = await client.post("/api/v1/auth/login", json={"email": email, "password": "Password123!"})
+    login_res = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "Password123!"}
+    )
     token = login_res.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
 
 @pytest.mark.asyncio
 async def test_empty_cart_checkout(client: AsyncClient):
@@ -14,16 +18,21 @@ async def test_empty_cart_checkout(client: AsyncClient):
     assert res.status_code == 400
     assert "empty cart" in res.json()["detail"].lower()
 
+
 @pytest.mark.asyncio
 async def test_successful_checkout(client: AsyncClient):
     headers = await get_auth_headers(client, "buyer@example.com")
 
     # Create product with stock 10
-    prod_res = await client.post("/api/v1/products", json={"name": "Monitor", "price": 300.0, "stock": 10})
+    prod_res = await client.post(
+        "/api/v1/products", json={"name": "Monitor", "price": 300.0, "stock": 10}
+    )
     prod_id = prod_res.json()["id"]
 
     # Add 3 items to cart
-    await client.post("/api/v1/cart/items", headers=headers, json={"product_id": prod_id, "quantity": 3})
+    await client.post(
+        "/api/v1/cart/items", headers=headers, json={"product_id": prod_id, "quantity": 3}
+    )
 
     # Checkout
     order_res = await client.post("/api/v1/orders", headers=headers)
@@ -42,6 +51,7 @@ async def test_successful_checkout(client: AsyncClient):
     # Verify product stock was reduced from 10 to 7
     prod_check = await client.get(f"/api/v1/products/{prod_id}")
     assert prod_check.json()["stock"] == 7
+
 
 @pytest.mark.asyncio
 async def test_order_ownership(client: AsyncClient):

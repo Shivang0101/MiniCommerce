@@ -1,8 +1,9 @@
 import json
 import logging
 from typing import Any
-from app.core.redis import get_redis
+
 from app.core.config import settings
+from app.core.redis import get_redis
 
 logger = logging.getLogger(__name__)
 

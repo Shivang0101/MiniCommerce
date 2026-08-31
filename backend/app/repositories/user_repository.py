@@ -1,7 +1,9 @@
 import uuid
+
+from app.models.user import User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.user import User
+
 
 class UserRepository:
     @staticmethod
@@ -15,10 +17,15 @@ class UserRepository:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def create(db: AsyncSession, email: str, password_hash: str, is_admin: bool = False, role: str = "CUSTOMER") -> User:
+    async def create(
+        db: AsyncSession,
+        email: str,
+        password_hash: str,
+        is_admin: bool = False,
+        role: str = "CUSTOMER",
+    ) -> User:
         user = User(email=email, password_hash=password_hash, is_admin=is_admin, role=role)
         db.add(user)
         await db.commit()
         await db.refresh(user)
         return user
-

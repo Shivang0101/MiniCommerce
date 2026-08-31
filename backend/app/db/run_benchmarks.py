@@ -1,21 +1,20 @@
-import sys
-import time
 import asyncio
 import statistics
+import sys
+import time
 from pathlib import Path
-from decimal import Decimal
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 import httpx
+from app.core.security import create_access_token
+from app.db.session import AsyncSessionLocal
 from sqlalchemy import text
-from app.db.session import AsyncSessionLocal, engine
-from app.core.security import hash_password, create_access_token
-from app.db.base import User, Product, Cart, CartItem, Order, OrderItem
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
+
 
 async def run_query_analysis_benchmarks():
     """Recreates the EXPLAIN ANALYZE benchmark queries documented in docs/v2/query-analysis.md."""
@@ -36,8 +35,13 @@ async def run_query_analysis_benchmarks():
         print("\n--- Experiment 1: User Lookup by Email (`WHERE email = '...'`) ---")
         try:
             res = await session.execute(
-                text("EXPLAIN ANALYZE SELECT * FROM users WHERE email = 'benchmark_test@example.com';")
-                if dialect_name == "postgresql" else text("EXPLAIN QUERY PLAN SELECT * FROM users WHERE email = 'benchmark_test@example.com';")
+                text(
+                    "EXPLAIN ANALYZE SELECT * FROM users WHERE email = 'benchmark_test@example.com';"
+                )
+                if dialect_name == "postgresql"
+                else text(
+                    "EXPLAIN QUERY PLAN SELECT * FROM users WHERE email = 'benchmark_test@example.com';"
+                )
             )
             explain_lines = res.scalars().all()
             for line in explain_lines:
@@ -49,8 +53,13 @@ async def run_query_analysis_benchmarks():
         print("\n--- Experiment 2: Product Catalog Price Range Filtering & Sorting ---")
         try:
             res = await session.execute(
-                text("EXPLAIN ANALYZE SELECT * FROM products WHERE price >= 50.00 AND price <= 200.00 ORDER BY price ASC LIMIT 20 OFFSET 0;")
-                if dialect_name == "postgresql" else text("EXPLAIN QUERY PLAN SELECT * FROM products WHERE price >= 50.00 AND price <= 200.00 ORDER BY price ASC LIMIT 20 OFFSET 0;")
+                text(
+                    "EXPLAIN ANALYZE SELECT * FROM products WHERE price >= 50.00 AND price <= 200.00 ORDER BY price ASC LIMIT 20 OFFSET 0;"
+                )
+                if dialect_name == "postgresql"
+                else text(
+                    "EXPLAIN QUERY PLAN SELECT * FROM products WHERE price >= 50.00 AND price <= 200.00 ORDER BY price ASC LIMIT 20 OFFSET 0;"
+                )
             )
             explain_lines = res.scalars().all()
             for line in explain_lines:
@@ -72,10 +81,11 @@ async def run_query_analysis_benchmarks():
             except Exception as e:
                 print(f"  OFFSET {off:6,d} -> Error: {e}")
 
+
 async def run_http_endpoint_benchmarks(concurrency: int = 50, total_requests: int = 500):
     """Recreates the HTTP load test performance benchmarks documented in docs/v2/performance.md."""
     print("\n" + "=" * 80)
-    print(f"2. RUNNING HTTP ENDPOINT BENCHMARKS (performance.md)")
+    print("2. RUNNING HTTP ENDPOINT BENCHMARKS (performance.md)")
     print(f"   Target: {BASE_URL}")
     print(f"   Concurrency: {concurrency} virtual users | Total Requests: {total_requests}")
     print("=" * 80)
@@ -102,16 +112,36 @@ async def run_http_endpoint_benchmarks(concurrency: int = 50, total_requests: in
 
     # Define endpoints to benchmark
     endpoints = [
-        ("GET /api/v1/products (Paginated)", "GET", f"{BASE_URL}/products?page=1&page_size=20", None, {}),
+        (
+            "GET /api/v1/products (Paginated)",
+            "GET",
+            f"{BASE_URL}/products?page=1&page_size=20",
+            None,
+            {},
+        ),
     ]
 
     if test_product_id:
-        endpoints.append(("GET /api/v1/products/{id}", "GET", f"{BASE_URL}/products/{test_product_id}", None, {}))
-        endpoints.append(("POST /api/v1/cart/items", "POST", f"{BASE_URL}/cart/items", {"product_id": test_product_id, "quantity": 1}, headers))
+        endpoints.append(
+            ("GET /api/v1/products/{id}", "GET", f"{BASE_URL}/products/{test_product_id}", None, {})
+        )
+        endpoints.append(
+            (
+                "POST /api/v1/cart/items",
+                "POST",
+                f"{BASE_URL}/cart/items",
+                {"product_id": test_product_id, "quantity": 1},
+                headers,
+            )
+        )
 
-    endpoints.append(("POST /api/v1/orders (Atomic Checkout)", "POST", f"{BASE_URL}/orders", None, headers))
+    endpoints.append(
+        ("POST /api/v1/orders (Atomic Checkout)", "POST", f"{BASE_URL}/orders", None, headers)
+    )
 
-    print(f"\n{'Endpoint':<40} | {'RPS':<8} | {'Avg (ms)':<9} | {'p50 (ms)':<9} | {'p95 (ms)':<9} | {'p99 (ms)':<9} | {'Error %':<7}")
+    print(
+        f"\n{'Endpoint':<40} | {'RPS':<8} | {'Avg (ms)':<9} | {'p50 (ms)':<9} | {'p95 (ms)':<9} | {'p99 (ms)':<9} | {'Error %':<7}"
+    )
     print("-" * 105)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -119,11 +149,15 @@ async def run_http_endpoint_benchmarks(concurrency: int = 50, total_requests: in
         try:
             health_check = await client.get(f"{BASE_URL}/products?page=1&page_size=1")
             if health_check.status_code != 200:
-                print(f"[ERROR] FastAPI server returned status {health_check.status_code}. Is Uvicorn running on port 8000?")
+                print(
+                    f"[ERROR] FastAPI server returned status {health_check.status_code}. Is Uvicorn running on port 8000?"
+                )
                 return
         except Exception:
             print("[ERROR] Could not connect to FastAPI server at http://127.0.0.1:8000.")
-            print("[HINT] Launch Uvicorn in another terminal first:\n       python -m uvicorn app.main:app --port 8000")
+            print(
+                "[HINT] Launch Uvicorn in another terminal first:\n       python -m uvicorn app.main:app --port 8000"
+            )
             return
 
         semaphore = asyncio.Semaphore(concurrency)
@@ -138,7 +172,9 @@ async def run_http_endpoint_benchmarks(concurrency: int = 50, total_requests: in
                     # Inject unique idempotency key for checkout route
                     current_headers = dict(req_headers)
                     if "orders" in url:
-                        current_headers["Idempotency-Key"] = f"bench_key_{time.time_ns()}_{request_index}"
+                        current_headers["Idempotency-Key"] = (
+                            f"bench_key_{time.time_ns()}_{request_index}"
+                        )
 
                     start_time = time.perf_counter()
                     try:
@@ -168,9 +204,12 @@ async def run_http_endpoint_benchmarks(concurrency: int = 50, total_requests: in
                 p95 = latencies[int(len(latencies) * 0.95)]
                 p99 = latencies[int(len(latencies) * 0.99)]
                 err_rate = (errors / total_requests) * 100
-                print(f"{name:<40} | {rps:<8.1f} | {avg_lat:<9.1f} | {p50:<9.1f} | {p95:<9.1f} | {p99:<9.1f} | {err_rate:<7.2f}%")
+                print(
+                    f"{name:<40} | {rps:<8.1f} | {avg_lat:<9.1f} | {p50:<9.1f} | {p95:<9.1f} | {p99:<9.1f} | {err_rate:<7.2f}%"
+                )
             else:
                 print(f"{name:<40} | FAILED (All requests returned errors)")
+
 
 async def run_redis_cache_benchmarks(num_requests: int = 50):
     """Recreates the Redis Cache-Aside latency benchmarks documented in docs/v3/performance.md."""
@@ -178,7 +217,7 @@ async def run_redis_cache_benchmarks(num_requests: int = 50):
     print("3. RUNNING REDIS CACHE-ASIDE LATENCY BENCHMARKS (docs/v3/performance.md)")
     print("=" * 80)
 
-    from app.core.redis import init_redis_pool, close_redis_pool
+    from app.core.redis import close_redis_pool, init_redis_pool
     from app.services.cache_service import CacheService
 
     await init_redis_pool()
@@ -192,10 +231,15 @@ async def run_redis_cache_benchmarks(num_requests: int = 50):
     async with AsyncSessionLocal() as session:
         t0 = time.perf_counter()
         from app.services.product_service import ProductService
-        products_miss, total_count = await ProductService.list_products(session, page=1, page_size=20)
+
+        products_miss, total_count = await ProductService.list_products(
+            session, page=1, page_size=20
+        )
         miss_latency_ms = (time.perf_counter() - t0) * 1000
 
-    print(f"  Cache MISS (Supabase DB Query + Cache Set) -> Latency: {miss_latency_ms:.2f} ms | Returned: {len(products_miss)} items")
+    print(
+        f"  Cache MISS (Supabase DB Query + Cache Set) -> Latency: {miss_latency_ms:.2f} ms | Returned: {len(products_miss)} items"
+    )
 
     # Step 3: Measure Repeated Cache Hit Latencies
     hit_latencies = []
@@ -211,10 +255,13 @@ async def run_redis_cache_benchmarks(num_requests: int = 50):
     p95_hit = hit_latencies[int(len(hit_latencies) * 0.95)]
     speedup = miss_latency_ms / avg_hit if avg_hit > 0 else 0
 
-    print(f"  Cache HIT  (Redis In-Memory Lookup, n={num_requests}) -> Avg: {avg_hit:.2f} ms | p50: {p50_hit:.2f} ms | p95: {p95_hit:.2f} ms")
+    print(
+        f"  Cache HIT  (Redis In-Memory Lookup, n={num_requests}) -> Avg: {avg_hit:.2f} ms | p50: {p50_hit:.2f} ms | p95: {p95_hit:.2f} ms"
+    )
     print(f"  [RESULT] Cache Hit Speedup: {speedup:.1f}x faster than database scan!")
 
     await close_redis_pool()
+
 
 async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
     """Recreates the V4 Asynchronous ARQ Task Offloading benchmark documented in docs/v4/benchmarks.md."""
@@ -222,7 +269,8 @@ async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
     print("4. RUNNING V4 ASYNCHRONOUS CHECKOUT LATENCY BENCHMARKS (docs/v4/benchmarks.md)")
     print("=" * 80)
 
-    from app.core.redis import init_redis_pool, close_redis_pool
+    from app.core.redis import close_redis_pool, init_redis_pool
+
     await init_redis_pool()
 
     async with AsyncSessionLocal() as session:
@@ -236,7 +284,9 @@ async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
         user_id = row[0]
 
         # Fetch product
-        p_res = await session.execute(text("SELECT id, name, price, stock FROM products WHERE stock > 20 LIMIT 1;"))
+        p_res = await session.execute(
+            text("SELECT id, name, price, stock FROM products WHERE stock > 20 LIMIT 1;")
+        )
         p_row = p_res.first()
         if not p_row:
             print("  [WARN] No product with available stock found.")
@@ -245,9 +295,9 @@ async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
         product_id = p_row[0]
 
     # Measure Real Synchronous Execution (DB checkout + executing task functions sequentially inline)
-    from app.tasks.order_tasks import send_receipt_email, audit_low_stock, record_analytics_event
-    from app.services.order_service import OrderService
     from app.repositories.cart_repository import CartRepository
+    from app.services.order_service import OrderService
+    from app.tasks.order_tasks import audit_low_stock, record_analytics_event, send_receipt_email
 
     sync_durations = []
     async_durations = []
@@ -255,7 +305,7 @@ async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
     async with AsyncSessionLocal() as session:
         cart = await CartRepository.get_or_create_by_user_id(session, user_id)
         cart_id = cart.id
-        
+
         for i in range(num_runs):
             # Seed item in cart for sync run
             await CartRepository.add_item(session, cart_id, product_id, 1)
@@ -264,14 +314,20 @@ async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
             t0 = time.perf_counter()
             try:
                 # 1. DB Checkout
-                order = await OrderService.create_order_checkout(session, user_id, idempotency_key=f"bench_sync_{time.time_ns()}_{i}")
+                order = await OrderService.create_order_checkout(
+                    session, user_id, idempotency_key=f"bench_sync_{time.time_ns()}_{i}"
+                )
                 # 2. Synchronously execute tasks inline
                 ctx = {}
-                await send_receipt_email(ctx, str(order.id), "alice@example.com", str(order.total_amount))
-                await audit_low_stock(ctx, [{"product_id": str(product_id), "name": "Test", "remaining_stock": 10}])
+                await send_receipt_email(
+                    ctx, str(order.id), "alice@example.com", str(order.total_amount)
+                )
+                await audit_low_stock(
+                    ctx, [{"product_id": str(product_id), "name": "Test", "remaining_stock": 10}]
+                )
                 await record_analytics_event(ctx, "ORDER_PLACED", {"order_id": str(order.id)})
                 sync_durations.append((time.perf_counter() - t0) * 1000)
-            except Exception as e:
+            except Exception:
                 pass
 
             # Seed item in cart for async run
@@ -280,9 +336,11 @@ async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
             # Measure Async Offloaded Duration (DB Commit + ARQ Redis Job Enqueue only)
             t0 = time.perf_counter()
             try:
-                await OrderService.create_order_checkout(session, user_id, idempotency_key=f"bench_async_{time.time_ns()}_{i}")
+                await OrderService.create_order_checkout(
+                    session, user_id, idempotency_key=f"bench_async_{time.time_ns()}_{i}"
+                )
                 async_durations.append((time.perf_counter() - t0) * 1000)
-            except Exception as e:
+            except Exception:
                 pass
 
     avg_sync = statistics.mean(sync_durations) if sync_durations else 0.0
@@ -290,16 +348,22 @@ async def run_v4_async_checkout_benchmarks(num_runs: int = 20):
     speedup = avg_sync / avg_async if avg_async > 0 else 1.0
 
     print(f"  Real Synchronous Checkout (DB + Inline Task Execution) -> Avg: {avg_sync:.2f} ms")
-    print(f"  Real Asynchronous ARQ Checkout (DB Commit + Redis Enqueue) -> Avg: {avg_async:.2f} ms")
-    print(f"  [RESULT] Asynchronous Offloading Speedup: {speedup:.1f}x reduction in checkout response latency!")
+    print(
+        f"  Real Asynchronous ARQ Checkout (DB Commit + Redis Enqueue) -> Avg: {avg_async:.2f} ms"
+    )
+    print(
+        f"  [RESULT] Asynchronous Offloading Speedup: {speedup:.1f}x reduction in checkout response latency!"
+    )
 
     await close_redis_pool()
+
 
 async def main():
     await run_query_analysis_benchmarks()
     await run_http_endpoint_benchmarks(concurrency=20, total_requests=100)
     await run_redis_cache_benchmarks(num_requests=50)
     await run_v4_async_checkout_benchmarks(num_runs=10)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

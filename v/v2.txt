@@ -410,3 +410,37 @@ npm run dev
 ================================================================================
 STATUS: VERSION 2 FULLY OPERATIONAL & VERIFIED (22/22 TESTS PASSED, VITE BUILD PASSED)
 ================================================================================
+
+
+
+1. FRONTEND / CLIENT
+   └── Sends HTTP POST /api/v1/orders (with cart items & Idempotency-Key)
+           │
+           ▼
+2. ROUTER LAYER (app/api/v1/orders.py)
+   └── Validates HTTP input, headers, and authentication. Passes clean data to Service.
+           │
+           ▼
+3. SERVICE LAYER (app/services/order_service.py)
+   └── Executes Business Logic & Transactions:
+       - Checks stock invariants
+       - Calculates total pricing
+       - Controls transaction boundaries (db.commit() / db.rollback())
+           │
+           ▼
+4. REPOSITORY LAYER (app/repositories/order_repository.py & product_repository.py)
+   └── Executes Pure Data Access:
+       - ProductRepository.get_by_ids_for_update() -> Runs "SELECT ... FOR UPDATE ORDER BY id ASC"
+       - OrderRepository.get_by_idempotency_key() -> Checks unique constraint
+       - OrderRepository.create_order() -> Inserts order + line items
+           │
+           ▼
+5. DATABASE (PostgreSQL / SQLAlchemy ORM)
+   └── Row locks executed & data persisted to PostgreSQL disk.
+
+
+Summary Table
+Layer	Primary Role	What it knows
+models/	Database Schema Blueprint	Knows table names, columns, data types, foreign keys, and constraints.
+repositories/	Data Access & Query Execution	Knows how to use SQLAlchemy ORM (select, where, join, FOR UPDATE) to fetch & modify data.
+SQLAlchemy Engine (session.py)	Database Communication Engine	Knows how to translate ORM calls into raw SQL and send network packets to PostgreSQL/Supabase.

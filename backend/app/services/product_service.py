@@ -1,12 +1,13 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
-from app.models.product import Product
-from app.schemas.product import ProductCreate
-from app.repositories.product_repository import ProductRepository
 
+from app.models.product import Product
+from app.repositories.product_repository import ProductRepository
+from app.schemas.product import ProductCreate
 from app.services.cache_service import CacheService
+from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
 
 class ProductService:
     @staticmethod
@@ -19,10 +20,7 @@ class ProductService:
     async def get_product(db: AsyncSession, product_id: uuid.UUID) -> Product:
         product = await ProductRepository.get_by_id(db, product_id)
         if not product:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Product not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
         return product
 
     @staticmethod
@@ -35,7 +33,7 @@ class ProductService:
         sort_by: str = "name",
         sort_order: str = "asc",
         search: str | None = None,
-        category: str | None = None
+        category: str | None = None,
     ) -> tuple[list[Product], int]:
         cache_key = f"products:page={page}:size={page_size}:min={min_price}:max={max_price}:sb={sort_by}:so={sort_order}:q={search}:c={category}"
         cached_data = await CacheService.get(cache_key)
@@ -54,7 +52,7 @@ class ProductService:
             sort_by=sort_by,
             sort_order=sort_order,
             search=search,
-            category=category
+            category=category,
         )
 
         # Store serialized response in Redis cache
@@ -70,5 +68,7 @@ class ProductService:
             }
             for p in products
         ]
-        await CacheService.set(cache_key, {"products": serialized_products, "total_count": total_count})
+        await CacheService.set(
+            cache_key, {"products": serialized_products, "total_count": total_count}
+        )
         return products, total_count

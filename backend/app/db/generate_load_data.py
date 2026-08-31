@@ -1,30 +1,63 @@
-import sys
 import asyncio
-import uuid
 import random
-from pathlib import Path
+import sys
+import uuid
 from decimal import Decimal
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import AsyncSessionLocal, engine
-from app.db.base import Base
-from app.models.user import User
-from app.models.product import Product
-from app.models.order import Order, OrderItem
 from app.core.security import hash_password
+from app.db.base import Base
+from app.db.session import AsyncSessionLocal, engine
+from app.models.order import Order, OrderItem
+from app.models.product import Product
+from app.models.user import User
 
-CATEGORIES = ["Laptops", "Smartphones", "Monitors", "Keyboards", "Storage", "Audio", "Networking", "Components"]
-ADJECTIVES = ["Ultra", "Pro", "Gaming", "Wireless", "Compact", "Ergonomic", "High-Speed", "Extreme", "Silent", "RGB"]
-NOUNS = ["Master", "Extreme", "V2", "Edition", "Series X", "Prime", "Elite", "Max", "Plus", "Studio"]
+CATEGORIES = [
+    "Laptops",
+    "Smartphones",
+    "Monitors",
+    "Keyboards",
+    "Storage",
+    "Audio",
+    "Networking",
+    "Components",
+]
+ADJECTIVES = [
+    "Ultra",
+    "Pro",
+    "Gaming",
+    "Wireless",
+    "Compact",
+    "Ergonomic",
+    "High-Speed",
+    "Extreme",
+    "Silent",
+    "RGB",
+]
+NOUNS = [
+    "Master",
+    "Extreme",
+    "V2",
+    "Edition",
+    "Series X",
+    "Prime",
+    "Elite",
+    "Max",
+    "Plus",
+    "Studio",
+]
 
 BATCH_SIZE = 5000  # Commit in chunks of 5000 to maximize throughput
 
-async def generate_load_data(num_users: int = 10000, num_products: int = 50000, num_orders: int = 100000):
-    print(f"[INFO] Starting high-speed dataset generation:")
+
+async def generate_load_data(
+    num_users: int = 10000, num_products: int = 50000, num_orders: int = 100000
+):
+    print("[INFO] Starting high-speed dataset generation:")
     print(f"   - Users: {num_users:,}")
     print(f"   - Products: {num_products:,}")
     print(f"   - Orders: {num_orders:,}")
@@ -41,14 +74,12 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
         user_ids = []
         user_batch = []
         run_id = str(uuid.uuid4())[:8]
-        
+
         for i in range(num_users):
             u_id = uuid.uuid4()
             user_ids.append(u_id)
             user = User(
-                id=u_id,
-                email=f"user_{run_id}_{i+1}@benchmark.com",
-                password_hash=pwd_hash
+                id=u_id, email=f"user_{run_id}_{i + 1}@benchmark.com", password_hash=pwd_hash
             )
             user_batch.append(user)
 
@@ -56,7 +87,7 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
                 db.add_all(user_batch)
                 await db.commit()
                 user_batch = []
-                print(f"   Progress: {i+1:,} / {num_users:,} users committed.")
+                print(f"   Progress: {i + 1:,} / {num_users:,} users committed.")
 
         if user_batch:
             db.add_all(user_batch)
@@ -79,15 +110,15 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
             cat = random.choice(CATEGORIES)
             adj = random.choice(ADJECTIVES)
             noun = random.choice(NOUNS)
-            name = f"{adj} {cat} {noun} #{i+1}"
+            name = f"{adj} {cat} {noun} #{i + 1}"
             stock = random.randint(10, 500)
 
             product = Product(
                 id=p_id,
                 name=name,
-                description=f"Performance laboratory benchmark item {i+1} in {cat}.",
+                description=f"Performance laboratory benchmark item {i + 1} in {cat}.",
                 price=price,
-                stock=stock
+                stock=stock,
             )
             product_batch.append(product)
 
@@ -95,7 +126,7 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
                 db.add_all(product_batch)
                 await db.commit()
                 product_batch = []
-                print(f"   Progress: {i+1:,} / {num_products:,} products committed.")
+                print(f"   Progress: {i + 1:,} / {num_products:,} products committed.")
 
         if product_batch:
             db.add_all(product_batch)
@@ -121,11 +152,7 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
                 total_amt += p_price * Decimal(str(qty))
 
                 item = OrderItem(
-                    id=uuid.uuid4(),
-                    order_id=order_id,
-                    product_id=p_id,
-                    quantity=qty,
-                    price=p_price
+                    id=uuid.uuid4(), order_id=order_id, product_id=p_id, quantity=qty, price=p_price
                 )
                 item_batch.append(item)
                 total_items_created += 1
@@ -135,7 +162,7 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
                 user_id=user_id,
                 status="CONFIRMED",
                 total_amount=total_amt,
-                idempotency_key=f"load_key_{i+1}"
+                idempotency_key=f"load_key_{i + 1}",
             )
             order_batch.append(order)
 
@@ -145,7 +172,9 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
                 await db.commit()
                 order_batch = []
                 item_batch = []
-                print(f"   Progress: {i+1:,} / {num_orders:,} orders committed ({total_items_created:,} items).")
+                print(
+                    f"   Progress: {i + 1:,} / {num_orders:,} orders committed ({total_items_created:,} items)."
+                )
 
         if order_batch:
             db.add_all(order_batch)
@@ -157,6 +186,7 @@ async def generate_load_data(num_users: int = 10000, num_products: int = 50000, 
         print(f"   Total Products: {num_products:,}")
         print(f"   Total Orders: {num_orders:,}")
         print(f"   Total Order Items: {total_items_created:,}")
+
 
 def main():
     users = 10000
@@ -171,6 +201,7 @@ def main():
         orders = int(sys.argv[3])
 
     asyncio.run(generate_load_data(num_users=users, num_products=products, num_orders=orders))
+
 
 if __name__ == "__main__":
     main()

@@ -1,10 +1,12 @@
 import uuid
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
-from app.models.user import User
-from app.schemas.user import UserCreate
+
 from app.core.security import hash_password, verify_password
+from app.models.user import User
 from app.repositories.user_repository import UserRepository
+from app.schemas.user import UserCreate
+from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
 
 class AuthService:
     @staticmethod
@@ -12,17 +14,17 @@ class AuthService:
         existing_user = await UserRepository.get_by_email(db, user_in.email)
         if existing_user:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
             )
-        
+
         hashed_pwd = hash_password(user_in.password)
         is_admin = getattr(user_in, "is_admin", False)
         role = getattr(user_in, "role", "CUSTOMER")
         if is_admin and role == "CUSTOMER":
             role = "SRE_ADMIN"
-        return await UserRepository.create(db, user_in.email, hashed_pwd, is_admin=is_admin, role=role)
-
+        return await UserRepository.create(
+            db, user_in.email, hashed_pwd, is_admin=is_admin, role=role
+        )
 
     @staticmethod
     async def authenticate_user(db: AsyncSession, email: str, password: str) -> User:

@@ -1,14 +1,18 @@
-import time
 import json
 import logging
+import time
 from typing import Any
+
 from app.core.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
+
 class TraceService:
     @staticmethod
-    async def record_trace(trace_id: str, endpoint: str, total_duration_ms: float, spans: list[dict[str, Any]]) -> None:
+    async def record_trace(
+        trace_id: str, endpoint: str, total_duration_ms: float, spans: list[dict[str, Any]]
+    ) -> None:
         redis = get_redis()
         if not redis:
             return
@@ -18,7 +22,7 @@ class TraceService:
                 "endpoint": endpoint,
                 "timestamp": time.time(),
                 "total_duration_ms": round(total_duration_ms, 2),
-                "spans": spans
+                "spans": spans,
             }
             # Store individual trace payload (TTL 1 hour)
             await redis.setex(f"trace:{trace_id}", 3600, json.dumps(trace_data))

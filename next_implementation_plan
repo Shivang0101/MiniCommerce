@@ -1,95 +1,261 @@
 ================================================================================
-MINICOMMERCE V5 MASTER IMPLEMENTATION PLAN
-Target: Enterprise Security, Distributed Resilience & Advanced Data Engineering
+MINICOMMERCE LABORATORY - FUTURE ENGINEERING ROADMAP (V6 ➔ V9)
+Targeting: DevOps Engineering, AWS Cloud Architecture, SRE & Senior Backend
 ================================================================================
 
-Phase Objective:
-Transform the MiniCommerce laboratory into an enterprise-grade, resilient production platform. 
-This phase introduces Zero-Trust Security (Refresh Token Rotation, HttpOnly Cookies, Redis Token Revocation, Scoped RBAC), Distributed Resilience Patterns (Circuit Breakers, Transactional Outbox Pattern, Graceful SIGTERM Shutdown, Health Probe Separation), and Advanced Data Engineering (Keyset Pagination, Soft Deletes, Connection Pool Tuning, and Payload-Hashed Idempotency).
-
+[EXECUTIVE SUMMARY & CAREER POSITIONING]
 --------------------------------------------------------------------------------
-STEP 1: ZERO-TRUST SECURITY, TOKEN ROTATION & SCOPED RBAC
---------------------------------------------------------------------------------
-1. Token Revocation List (Redis Blacklist):
-   - Create `app/services/token_blacklist.py` service.
-   - Upon `POST /api/v1/auth/logout`, store the JWT `jti` (JWT ID) in Redis with a TTL matching the token's remaining lifespan.
-   - Update `deps.get_current_user` to check Redis before granting endpoint authorization.
+MiniCommerce V1 through V5 established an enterprise-grade backend architecture:
+- 5-Tier Layering (Routers ➔ Services ➔ Repositories ➔ Models ➔ DB/Cache/Workers)
+- Pessimistic Row-Level Locking (`SELECT FOR UPDATE` + deterministic ID ordering)
+- Transactional Outbox Pattern + ARQ Redis Background Worker Pool + Outbox DLQ
+- Redis Cache-Aside Layer (~36x read speedup) + Fast 0.2s Resilient DB Fallback
+- Thread-Safe Circuit Breaker State Machine + SHA-256 Payload-Hashed Idempotency
+- Dual-Token JWT Rotation (Access JWT + HttpOnly Refresh Cookie) + Redis Blacklist
+- Scoped Role-Based Access Control (RBAC) + Keyset Cursor-Based Pagination
+- SQL CTEs & Window Functions Revenue Analytics Engine (`RANK() OVER()`, `SUM() OVER()`)
+- Store Manager Portal UI + Axios 401 Automatic Refresh Interceptor
+- 409,913 Record Production Benchmark Dataset on Supabase PostgreSQL AWS Cloud
 
-2. Dual-Token System & Refresh Token Rotation:
-   - Access Token: Short-lived (15 minutes), passed via `Authorization: Bearer <token>` header.
-   - Refresh Token: Long-lived (7 days), stored in `HttpOnly`, `Secure`, `SameSite=Strict` cookie.
-   - Implement `POST /api/v1/auth/refresh`: Validates Refresh Token, revokes old Refresh Token, and issues a new Access Token + rotated Refresh Token pair.
+To position yourself as a top-tier candidate for DevOps, AWS Cloud Engineering, 
+Backend Systems, and Site Reliability Engineering (SRE) roles, Versions 6 through 9 
+expand MiniCommerce into automated CI/CD, Infrastructure as Code (IaC) on AWS, 
+Prometheus/Grafana telemetry, Read-Replica database splitting, and chaos engineering.
 
-3. Scoped Role-Based Access Control (RBAC):
-   - Expand roles: `CUSTOMER`, `STORE_MANAGER`, `SRE_ADMIN`.
-   - Define permission scopes (`products:read`, `products:write`, `products:delete`, `stock:update`, `orders:create`, `admin:telemetry`).
-   - Create `deps.require_scope(scope_name)` dependency for fine-grained authorization.
-   - `STORE_MANAGER` role can create/edit products, restock inventory, and soft-delete items.
+================================================================================
+VERSION 6: DEVOPS AUTOMATION & CI/CD PIPELINE ENGINEERING (V6)
+================================================================================
 
---------------------------------------------------------------------------------
-STEP 2: DISTRIBUTED RESILIENCE PATTERNS (CIRCUIT BREAKER & TRANSACTIONAL OUTBOX)
---------------------------------------------------------------------------------
-1. Circuit Breaker Pattern (`app/core/circuit_breaker.py`):
-   - Implement a thread-safe Circuit Breaker state machine (`CLOSED` -> `OPEN` -> `HALF-OPEN`).
-   - Monitor error rate across database queries and Redis calls over a 10s sliding window.
-   - If failure rate exceeds 50%, trip breaker to `OPEN` for 15s to isolate downstream failures and prevent cascading thread exhaustion.
+[GOAL]
+Transform manual development workflows into fully automated, production-grade 
+CI/CD pipelines with automated linting, security scanning, pytest suites, 
+multi-stage container builds, and container registry delivery.
 
-2. Transactional Outbox Pattern (100% Guaranteed Event Delivery):
-   - Create `outbox` table in PostgreSQL: `id`, `event_type`, `payload_json`, `status` (PENDING/PROCESSED), `created_at`.
-   - Update `OrderService.create_order_checkout`: Write order, deduct stock, AND insert `outbox` record inside the SAME atomic SQL transaction (`db.commit()`).
-   - Create ARQ background outbox processor (`process_outbox_events` task) polling PENDING outbox records, pushing jobs to ARQ, and marking outbox records as PROCESSED.
+[KEY DELIVERABLES & INFRASTRUCTURE]
 
-3. Graceful Shutdown & Signal Handling (`SIGTERM` / `SIGINT`):
-   - Intercept `SIGTERM` in FastAPI lifespan and ARQ worker.
-   - Stop accepting new HTTP connections; allow active checkout transactions up to 30 seconds to finish.
-   - Gracefully drain connection pools (`await engine.dispose()`) and close Redis connections.
+1. Pre-Commit Hooks (`.pre-commit-config.yaml`):
+   - Automatic local execution before git commits:
+     * `ruff` / `flake8` for Python code formatting & linting.
+     * `black` code formatter.
+     * `detect-secrets` scanning for exposed API keys or credentials.
+     * `check-yaml`, `check-json`, `end-of-file-fixer`.
 
---------------------------------------------------------------------------------
-STEP 3: STRUCTURED LOGGING, CORRELATED TRACING & HEALTH PROBE SEPARATION
---------------------------------------------------------------------------------
-1. Structured JSON Logger:
-   - Configure Python `logging` to format output as structured JSON (`timestamp`, `level`, `trace_id`, `span_id`, `user_id`, `duration_ms`, `http_status`).
-   - Ensure trace IDs flow through all FastAPI middlewares, DB queries, and ARQ background workers.
+2. GitHub Actions Continuous Integration (CI) Workflow (`.github/workflows/ci.yml`):
+   - Trigger: Pull Requests and pushes to `main` and `develop` branches.
+   - Job 1: Code Linting & Static Analysis (`ruff`, `mypy` type checking).
+   - Job 2: Security & Vulnerability Scanning (`bandit` for Python AST security, `trivy` for dependency vulnerabilities).
+   - Job 3: Automated Testing & Coverage:
+     * Launch Postgres 15 and Redis 7 service containers inside GitHub Actions runner.
+     * Execute full 43+ test Pytest suite (`pytest --cov=app --cov-report=xml`).
+     * Fail build if test coverage drops below target threshold (85%).
+     * Upload coverage artifacts to Codecov / GitHub Actions summary.
 
-2. Health Probe Separation (`/healthz/liveness` vs `/healthz/readiness`):
-   - `GET /healthz/liveness`: Returns `200 OK` if Uvicorn process is running.
-   - `GET /healthz/readiness`: Executes `SELECT 1` on PostgreSQL and `PING` on Redis. Returns `200 OK` only if downstream stores are healthy (returns `503 Service Unavailable` for ALB routing isolation if DB drops).
+3. GitHub Actions Continuous Delivery (CD) Workflow (`.github/workflows/cd.yml`):
+   - Trigger: Merges to `main` branch or Git release tags (`v*.*.*`).
+   - Job 1: Multi-Stage Docker Image Build:
+     * Build `backend`, `worker`, and `frontend` Docker images using BuildKit caching.
+     * Tag images with `latest`, Git commit SHA (`${{ github.sha }}`), and release version.
+   - Job 2: Push to Container Registry:
+     * Authenticate and push container images to GitHub Container Registry (GHCR - `ghcr.io`) or Amazon ECR.
+   - Job 3: Automated Staging Environment Deployment Notification.
 
---------------------------------------------------------------------------------
-STEP 4: ADVANCED DATA ENGINEERING & IDEMPOTENCY PAYLOAD HASHING
---------------------------------------------------------------------------------
-1. Keyset (Cursor-Based) Pagination:
-   - Add Keyset pagination helper to `ProductRepository`:
-     `SELECT * FROM products WHERE id > :last_seen_id AND is_deleted = FALSE ORDER BY id ASC LIMIT :page_size`
-   - Eliminates deep `OFFSET` buffer scan overhead on catalog queries.
+[DIRECTORY STRUCTURE TO ADD]
+.github/
+  └── workflows/
+      ├── ci.yml
+      └── cd.yml
+.pre-commit-config.yaml
+pyproject.toml
 
-2. Soft Deletion & Audit Timestamps:
-   - Add `is_deleted: bool = False` and `deleted_at: datetime | None = None` to `Product` model.
-   - Update `delete_product` repository method to perform soft deletion (`is_deleted = True`) instead of physical row deletion.
+================================================================================
+VERSION 7: INFRASTRUCTURE AS CODE (IaC) & AWS CLOUD ARCHITECTURE (V7)
+================================================================================
 
-3. Payload-Hashed Idempotency Engine:
-   - Compute `SHA-256` hash of checkout request payload.
-   - Store hash alongside `idempotency_key` in PostgreSQL / Redis.
-   - If retry request matches key but has a different payload, reject immediately with `HTTP 409 Conflict`.
+[GOAL]
+Provision a highly available, secure, production-grade cloud infrastructure on 
+Amazon Web Services (AWS) using Terraform (or AWS CDK) and deploy MiniCommerce to 
+AWS ECS Fargate behind an Application Load Balancer.
 
-4. Connection Pool Tuning:
-   - Configure `create_async_engine`: `pool_size=15`, `max_overflow=10`, `pool_recycle=1800`, `pool_pre_ping=True`.
+[KEY DELIVERABLES & ARCHITECTURE]
 
---------------------------------------------------------------------------------
-STEP 5: FRONTEND STORE MANAGER PORTAL & REFRESH TOKEN INTERCEPTOR
---------------------------------------------------------------------------------
-1. Axios/Fetch Interceptor for Token Rotation (`api.js`):
-   - Catch `HTTP 401` errors, call `POST /auth/refresh` with HttpOnly cookie, and retry original request seamlessly.
+1. Terraform Modular Infrastructure Layout (`terraform/`):
+   - `modules/vpc`:
+     * AWS VPC across 2 Availability Zones (AZs) in `us-east-1` (or `ap-south-1`).
+     * 2 Public Subnets (for ALB & NAT Gateways).
+     * 2 Private Application Subnets (for ECS Fargate backend/worker/frontend tasks).
+     * 2 Private Database Subnets (for RDS PostgreSQL & ElastiCache Redis).
+     * Internet Gateway + 2 NAT Gateways for secure outbound internet access from private subnets.
+   - `modules/rds`:
+     * AWS RDS PostgreSQL (Postgres 15) Multi-AZ instance in private database subnets.
+     * DB Subnet Group, Security Groups restricting access exclusively from ECS security group.
+     * Storage Encryption using AWS KMS (`aws_kms_key`).
+     * Automated daily snapshots, backup retention (7 days), and `performance_insights_enabled`.
+   - `modules/elasticache`:
+     * AWS ElastiCache Redis Replication Group in private database subnets.
+     * Transit Encryption (TLS) and At-Rest Encryption.
+     * Redis AUTH token integration stored in AWS Secrets Manager.
+   - `modules/ecs`:
+     * AWS ECS Fargate Cluster (`minicommerce-cluster`).
+     * ECS Task Definitions for `backend` (FastAPI), `worker` (ARQ), and `frontend` (Nginx).
+     * ECS Service Definitions with target groups connected to Application Load Balancer (ALB).
+     * Target Tracking Auto-Scaling Policies:
+       - Scale OUT when average CPU utilization > 70% or Memory > 80%.
+       - Scale IN when utilization normalizes.
+   - `modules/alb`:
+     * AWS Application Load Balancer in public subnets.
+     * HTTP Listener (Port 80) automatically redirecting to HTTPS (Port 443).
+     * HTTPS Listener with AWS Certificate Manager (ACM) SSL/TLS Certificate.
+   - `modules/iam_and_secrets`:
+     * IAM Task Execution Roles with least-privilege policies.
+     * AWS Secrets Manager integration: FastAPI dynamically fetches `DATABASE_URL`, `REDIS_URL`, and `JWT_SECRET` at container startup via AWS SDK (`boto3`) or environment injection.
 
-2. Store Manager Dashboard Portal (`StoreManagerDashboard.jsx`):
-   - Management interface for store managers to add new products, update stock quantities, and soft-delete catalog items using scoped RBAC.
+2. Environments Separation (`terraform/environments/`):
+   - `environments/staging/` (`main.tf`, `variables.tf`, `terraform.tfvars`).
+   - `environments/prod/` (`main.tf`, `variables.tf`, `terraform.tfvars`).
+   - Remote State Storage: AWS S3 Bucket for Terraform state files + AWS DynamoDB table for state locking (`LockID`).
 
---------------------------------------------------------------------------------
-STEP 6: AUTOMATED PYTEST SUITE EXPANSION & VERIFICATION
---------------------------------------------------------------------------------
-1. Add `tests/test_v5_security.py`:
-   - Test Refresh Token rotation, token revocation list, and RBAC scope enforcement.
-2. Add `tests/test_v5_resilience.py`:
-   - Test Circuit Breaker state transitions, Transactional Outbox pattern polling, and payload-hashed idempotency conflict checks.
-3. Add `tests/test_v5_data.py`:
-   - Test Keyset pagination boundary conditions and soft deletion queries.
+[DIRECTORY STRUCTURE TO ADD]
+terraform/
+  ├── environments/
+  │   ├── staging/
+  │   │   ├── main.tf
+  │   │   ├── variables.tf
+  │   │   └── terraform.tfvars
+  │   └── prod/
+  │       ├── main.tf
+  │       ├── variables.tf
+  │       └── terraform.tfvars
+  └── modules/
+      ├── vpc/
+      ├── rds/
+      ├── elasticache/
+      ├── ecs/
+      ├── alb/
+      └── iam/
+
+================================================================================
+VERSION 8: ENTERPRISE OBSERVABILITY & SITE RELIABILITY ENGINEERING (SRE) (V8)
+================================================================================
+
+[GOAL]
+Implement industry-standard observability, telemetry scraping, centralized metric 
+collection, custom SRE alerting rules, and Grafana dashboard visualizers.
+
+[KEY DELIVERABLES & INFRASTRUCTURE]
+
+1. Standard Prometheus Metrics Exporter (`app/core/telemetry.py`):
+   - Integrate `prometheus-fastapi-instrumentator` exposing `/metrics` endpoint.
+   - Custom Business & Operational Prometheus Metrics:
+     * `http_requests_total` (counter: path, method, status_code).
+     * `http_request_duration_seconds` (histogram: path, method, quantiles p50, p90, p99).
+     * `db_pool_connections_active` & `db_pool_connections_idle` (gauges).
+     * `redis_cache_hits_total` & `redis_cache_misses_total` (counters).
+     * `arq_worker_queue_depth` & `arq_tasks_completed_total` (counters/gauges).
+     * `outbox_events_pending_total` & `outbox_events_dlq_total` (gauges).
+     * `circuit_breaker_state` (gauge: 0=CLOSED, 1=HALF-OPEN, 2=OPEN).
+
+2. Prometheus & Grafana Container Integration (`docker-compose.yml` & AWS ECS):
+   - Add `prometheus` service scraping FastAPI `/metrics` every 15s.
+   - Add `grafana` service pre-configured with Prometheus data source.
+
+3. Pre-Built Grafana Dashboard Suite (`grafana/dashboards/`):
+   - **Dashboard 1: The 4 Golden Signals (SRE Master Control)**:
+     * *Latency*: Response duration percentiles (p50, p95, p99).
+     * *Traffic*: Requests Per Second (RPS) broken down by HTTP route.
+     * *Errors*: 4xx and 5xx error percentage rate gauge (Alert threshold > 1%).
+     * *Saturation*: Container CPU %, RAM usage, DB connection pool saturation.
+   - **Dashboard 2: Database, Cache & Worker Engineering**:
+     * PostgreSQL Active Connection Count vs Max Pool Limit.
+     * Redis Cache Hit Rate % Gauge (`Hits / (Hits + Misses)`).
+     * ARQ Worker Execution Latency & Outbox Event Lag.
+     * Circuit Breaker State Transition Timeline.
+
+4. OpenTelemetry Collector & Jaeger Distributed Tracing:
+   - Configure OpenTelemetry Python SDK (`opentelemetry-sdk`, `opentelemetry-exporter-otlp`).
+   - Export trace spans over OTLP gRPC protocol to Jaeger or AWS X-Ray.
+   - Enable distributed trace propagation across Nginx ➔ FastAPI ➔ PostgreSQL ➔ Redis ➔ ARQ Worker.
+
+5. Alertmanager Rules & Slack/Email Notifications (`prometheus/alerts.yml`):
+   - Alert Rule: `HighFiveHundredErrorRate` (> 2% 5xx errors for 2 mins).
+   - Alert Rule: `CircuitBreakerOpen` (Downstream datastore circuit breaker tripped).
+   - Alert Rule: `OutboxDLQBacklog` (Outbox DLQ contains > 5 unhandled dead-letter events).
+   - Alert Rule: `HighLatencyP95` (p95 API response time > 500ms for 5 mins).
+
+[DIRECTORY STRUCTURE TO ADD]
+prometheus/
+  ├── prometheus.yml
+  └── alerts.yml
+grafana/
+  ├── provisioning/
+  │   ├── datasources/
+  │   └── dashboards/
+  └── dashboards/
+      ├── golden_signals.json
+      └── database_and_cache.json
+
+================================================================================
+VERSION 9: CLOUD-NATIVE HIGH AVAILABILITY, DISASTER RECOVERY & CHAOS ENGINEERING (V9)
+================================================================================
+
+[GOAL]
+Implement PostgreSQL Read-Replica connection splitting, zero-downtime Blue/Green 
+deployments, automated stress testing, and Chaos Engineering disaster recovery runbooks.
+
+[KEY DELIVERABLES & HARDENING]
+
+1. Database Read-Replica Query Routing Engine (`app/db/session.py`):
+   - Configure Dual SQLAlchemy AsyncEngines:
+     * `primary_engine`: Connects to AWS RDS Primary (Master) instance.
+     * `replica_engine`: Connects to AWS RDS Read Replica / Aurora Reader endpoint.
+   - Router-Level Connection Splitting:
+     * `get_write_db`: Routes mutations (`INSERT`, `UPDATE`, `DELETE`, `SELECT FOR UPDATE`) to Primary DB.
+     * `get_read_db`: Routes read queries (`GET /products`, `GET /products/keyset`, `GET /admin/analytics`) to Read Replica pool.
+   - Speeds up read throughput under heavy load by offloading read traffic from the primary DB node.
+
+2. Locust / k6 Performance & Load Testing Suite (`tests/load/`):
+   - `locustfile.py`: Simulates 1,000+ virtual users concurrently searching products, adding items to cart, and executing idempotent checkout transactions.
+   - Measures maximum RPS capacity, p99 latency degradation under load, and Redis cache hit ratios under stress.
+   - Failure Injection Scenarios: Simulates sudden Redis container crashes to verify smooth 0.2s fallback to PostgreSQL with 0% HTTP 500 impact.
+
+3. AWS WAF (Web Application Firewall) & Security Hardening:
+   - AWS WAF Web ACL attached to Application Load Balancer:
+     * Rate Limiting Rule: Block IPs exceeding 1,000 requests per 5 minutes.
+     * SQL Injection (SQLi) Protection Rule Set.
+     * Cross-Site Scripting (XSS) Protection Rule Set.
+     * Known Bad Inputs & IP Reputation Rule Set.
+
+4. Disaster Recovery & Chaos Engineering Runbook (`docs/v9/chaos-and-dr.md`):
+   - Chaos Experiment 1: RDS Primary Failover (measuring failover duration to Multi-AZ standby).
+   - Chaos Experiment 2: Redis Cache Flush / Eviction under load (verifying DB pool bounds).
+   - Chaos Experiment 3: ARQ Worker Process Crash (verifying Outbox transaction durability and DLQ replay recovery).
+   - Documented Recovery Time Objective (RTO < 30s) and Recovery Point Objective (RPO = 0s - Zero data loss guaranteed by Outbox pattern).
+
+================================================================================
+SUMMARY: CAREER & INTERNSHIP COMPETENCE MATRIX
+================================================================================
+
+Upon completion of V1 through V9, your MiniCommerce project will demonstrate mastery across:
+
+1. **Backend Software Engineering**:
+   - FastAPI, SQLAlchemy 2.x, Pydantic v2, Python 3.12, Async/Await concurrency.
+   - 5-Tier Data Layer, Repository Pattern, Dependency Injection.
+   - Pessimistic Row Locking (`SELECT FOR UPDATE`), Deterministic Lock Ordering.
+   - Transactional Outbox Pattern, ARQ Redis Background Queue, Dead-Letter Queue (DLQ).
+   - Keyset Cursor Pagination, Soft Deletion, SHA-256 Payload Hash Idempotency.
+   - Dual JWT Token Rotation, HttpOnly Cookies, Redis Token Blacklisting, Scoped RBAC.
+   - SQL CTEs & Window Functions (`RANK() OVER()`, `SUM() OVER()`).
+
+2. **DevOps & Cloud Engineering (AWS)**:
+   - Multi-stage Docker optimization, Docker Compose orchestration.
+   - GitHub Actions CI/CD (Linting, Security Scanning, Pytest Matrix, Container Registry Push).
+   - Infrastructure as Code (Terraform) provisioning AWS VPC, Subnets, Internet/NAT Gateways, RDS Postgres Multi-AZ, ElastiCache Redis, ECS Fargate, ALB, IAM Roles, Secrets Manager.
+
+3. **Site Reliability Engineering (SRE) & Observability**:
+   - Prometheus metrics scraping (`/metrics`), custom metric counters/histograms.
+   - Grafana SRE Dashboard Suite (4 Golden Signals, DB Pool Saturation, Cache Hit Ratio, Circuit Breakers).
+   - Distributed Tracing (OpenTelemetry + Jaeger / AWS X-Ray).
+   - Alertmanager rules & Chaos Engineering Disaster Recovery Runbooks.
+
+================================================================================
+END OF ROADMAP SPECIFICATION
+================================================================================

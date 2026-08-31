@@ -1,7 +1,8 @@
 import logging
-from redis.asyncio import Redis, ConnectionPool
-from arq.connections import create_pool, ArqRedis, RedisSettings
+
 from app.core.config import settings
+from arq.connections import ArqRedis, RedisSettings, create_pool
+from redis.asyncio import ConnectionPool, Redis
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ async def init_redis_pool() -> None:
             settings.REDIS_URL,
             decode_responses=True,
             socket_connect_timeout=0.5,
-            socket_timeout=0.5
+            socket_timeout=0.5,
         )
         redis_client = Redis(connection_pool=redis_pool)
         # Test connection ping
@@ -26,7 +27,9 @@ async def init_redis_pool() -> None:
     except Exception as e:
         redis_client = None
         redis_pool = None
-        logger.warning(f"Failed to initialize Redis pool on startup: {e}. Falling back to DB-only operations.")
+        logger.warning(
+            f"Failed to initialize Redis pool on startup: {e}. Falling back to DB-only operations."
+        )
 
     try:
         arq_settings = RedisSettings.from_dsn(settings.REDIS_URL)
@@ -34,7 +37,9 @@ async def init_redis_pool() -> None:
         logger.info(f"Connected to ARQ Redis queue pool at {settings.REDIS_URL}")
     except Exception as e:
         arq_pool = None
-        logger.warning(f"Failed to initialize ARQ pool on startup: {e}. Task offloading will fall back gracefully.")
+        logger.warning(
+            f"Failed to initialize ARQ pool on startup: {e}. Task offloading will fall back gracefully."
+        )
 
 
 async def close_redis_pool() -> None:

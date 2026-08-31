@@ -1,13 +1,17 @@
-# 🛒 MiniCommerce — Enterprise Security, Distributed Resilience & Advanced Data Engineering (V5)
+# 🛒 MiniCommerce — Enterprise Security, Distributed Resilience & DevOps Automation (V6)
 
 Welcome to **MiniCommerce**, an evolving, production-grade backend engineering and system design laboratory. 
 
-MiniCommerce serves as a benchmark laboratory for exploring **high-throughput backend patterns**, **database optimization**, **pessimistic concurrency control**, **in-memory distributed caching**, **asynchronous task offloading**, **sliding-window rate limiting**, **zero-trust dual-token rotation**, **distributed resilience patterns**, and **observability tracing**.
+MiniCommerce serves as a benchmark laboratory for exploring **high-throughput backend patterns**, **database optimization**, **pessimistic concurrency control**, **in-memory distributed caching**, **asynchronous task offloading**, **sliding-window rate limiting**, **zero-trust dual-token rotation**, **distributed resilience patterns**, **automated CI/CD pipelines**, and **container delivery**.
 
 ---
 
-## 🚀 Key System Features (Version 5 Current State)
+## 🚀 Key System Features (Version 6 Current State)
 
+- **🛠️ Automated Git Pre-Commit Quality Hooks**: `.pre-commit-config.yaml` executing `ruff`, `ruff-format`, `black`, and `detect-secrets` leak scanning before git commits.
+- **⚙️ Centralized Tooling Configuration (`pyproject.toml`)**: Unified quality rules for Ruff, Mypy type-checking, Pytest, and Coverage report generation (`coverage.xml`).
+- **🔄 GitHub Actions CI Pipeline (`ci.yml`)**: Automated Pull Request and `main`/`develop` branch quality gates executing Ruff linting, Mypy static type checking, Bandit AST security scanning, Trivy vulnerability checks, and Pytest with `postgres:15-alpine` and `redis:7-alpine` service containers.
+- **📦 GitHub Actions CD Container Pipeline (`cd.yml`)**: Automated Docker BuildKit multi-stage container builds pushing `backend`, `worker`, and `frontend` images directly to GitHub Container Registry (`ghcr.io`).
 - **🔐 Dual-Token Zero-Trust Security**: Short-lived Access Tokens (15 min) in `Authorization: Bearer` headers + Long-lived Refresh Tokens (7 days) in `HttpOnly`, `SameSite=Lax` cookies. Automatic token rotation via `POST /api/v1/auth/refresh`.
 - **🚫 Redis Token Revocation List (`TokenBlacklistService`)**: Instant JWT revocation on logout (`POST /api/v1/auth/logout`) or token rotation. `deps.get_current_user` rejects revoked tokens with `401 Unauthorized`.
 - **🛡️ Scoped Role-Based Access Control (RBAC)**: Fine-grained roles (`CUSTOMER`, `STORE_MANAGER`, `SRE_ADMIN`) mapped to explicit permission scope lists (`products:read`, `products:write`, `products:delete`, `orders:create`, `admin:telemetry`).
@@ -18,7 +22,6 @@ MiniCommerce serves as a benchmark laboratory for exploring **high-throughput ba
 - **⏩ Keyset (Cursor-Based) Pagination**: Constant `O(1)` query execution via `GET /api/v1/products/keyset` (`WHERE id > :last_seen_id AND is_deleted = FALSE ORDER BY id ASC LIMIT :limit`), bypassing deep `OFFSET` buffer scan overheads.
 - **🗑️ Soft Deletion & Audit Tracking**: Soft deletion via `DELETE /api/v1/products/{id}` (`is_deleted = True`, `deleted_at = now()`) protecting catalog historical integrity.
 - **🔒 SHA-256 Payload-Hashed Idempotency Engine**: SHA-256 hash comparison on idempotency key reuse, returning `HTTP 409 Conflict` on request payload mismatches.
-- **⚙️ Connection Pool Tuning**: Optimized AsyncEngine pool settings (`pool_size=15`, `max_overflow=10`, `pool_recycle=1800`, `pool_pre_ping=True`).
 - **🏬 React Store Manager Portal & 401 Interceptor**: Store Manager Dashboard UI (`StoreManagerDashboard.jsx`) for product creation, stock restocking, and soft-deletion, supported by an Axios/Fetch 401 automatic token refresh interceptor in `api.js`.
 - **📊 Datadog-Grade Enterprise Observability Dashboard**: Control panel featuring a System Operational Status Bar, top KPI metrics, live ARQ worker task log streams, and an OpenTelemetry-Style Distributed Waterfall Trace Visualizer.
 - **🐳 Multi-Container Orchestration**: Production-ready `docker-compose.yml` orchestrating `backend` (FastAPI), `redis` (Redis 7 Alpine), `worker` (ARQ Background Worker), and `frontend` (Nginx Alpine multi-stage asset server).
@@ -156,7 +159,7 @@ MiniCommerce strictly enforces a 5-tier separation of concerns across both local
 │  ├─ Sliding-Window Rate Limiter Middleware (Redis ZSETs with Tier Thresholds)    │
 │  └─ Secured Admin Observability Dashboard (/admin UI + JWT is_admin Protection)   │
 │                                                                                   │
-│  [VERSION 5] Enterprise Security, Distributed Resilience & Data Engineering (Current)│
+│  [VERSION 5] Enterprise Security, Distributed Resilience & Data Engineering       │
 │  ├─ Dual-Token Rotation (Access JWT + HttpOnly Refresh Cookie + /auth/refresh)   │
 │  ├─ Redis Token Revocation List (Logout blacklist matching token TTL)            │
 │  ├─ Scoped Role-Based Access Control (CUSTOMER, STORE_MANAGER, SRE_ADMIN)         │
@@ -166,6 +169,12 @@ MiniCommerce strictly enforces a 5-tier separation of concerns across both local
 │  ├─ Keyset Cursor Pagination (O(1) execution avoiding deep OFFSET scans)         │
 │  ├─ Soft Delete Architecture & SHA-256 Payload-Hashed Idempotency Engine          │
 │  └─ Store Manager Portal UI & Axios 401 Automatic Token Refresh Interceptor      │
+│                                                                                   │
+│  [VERSION 6] DevOps Automation & CI/CD Pipeline Engineering (Current)             │
+│  ├─ Git Pre-Commit Hooks (Ruff, Black, Detect-Secrets, YAML/JSON formatters)      │
+│  ├─ Centralized Tool Configuration (pyproject.toml: Ruff, Mypy, Pytest, Cov >= 85%)│
+│  ├─ GitHub Actions CI Pipeline (Linting, Mypy, Bandit, Trivy, Pytest Services)    │
+│  └─ GitHub Actions CD Pipeline (Multi-Stage Docker builds & GHCR delivery)        │
 │                                                                                   │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -238,8 +247,10 @@ Detailed architectural specifications and experiment logs:
 - **[v/v3.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v3.txt)**: Version 3 Master Specification
 - **[v/v4.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v4.txt)**: Version 4 Master Specification & Work Log
 - **[v/v5.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v5.txt)**: Version 5 Master Specification & Work Log
+- **[v/v6.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v6.txt)**: Version 6 Master Specification & Work Log
 - **[docs/v5/security-and-rbac.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/security-and-rbac.md)**: Zero-Trust Security, Token Rotation & Scoped RBAC
 - **[docs/v5/resilience-and-outbox.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/resilience-and-outbox.md)**: Circuit Breakers, Transactional Outbox & Signal Handling
 - **[docs/v5/data-engineering.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/data-engineering.md)**: Keyset Pagination, Soft Deletes & Payload Hashing
 - **[docs/v5/frontend-architecture.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/frontend-architecture.md)**: Store Manager Portal & 401 Interceptor Architecture
 - **[docs/v5/troubleshooting.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/troubleshooting.md)**: Comprehensive V5 Error Log & Resolution Tracker
+- **[docs/v6/devops-and-cicd.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v6/devops-and-cicd.md)**: DevOps Automation, Pre-Commit Hooks & CI/CD Pipeline Architecture
