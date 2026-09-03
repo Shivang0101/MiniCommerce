@@ -6,7 +6,7 @@ MINICOMMERCE V8 LABORATORY - MASTER VERSION 8 SPECIFICATION & WORK LOG
 --------------------------------------------------------------------------------
 Version 8 establishes enterprise-grade observability, telemetry collection, 
 custom SRE alerting rules, OpenTelemetry distributed tracing, automated unit/integration
-tests, and pre-built Grafana dashboards across local Docker environments and AWS Cloud Infrastructure.
+tests, a 100-user concurrency load testing engine, and pre-built Grafana dashboards across local Docker environments and AWS Cloud Infrastructure.
 
 ASCII Observability Architecture & Data Flows:
 
@@ -77,7 +77,24 @@ def setup_telemetry(app: FastAPI) -> Instrumentator:
     return instrumentator
 ```
 
-2. Amazon Managed Prometheus (AMP) & Grafana (AMG) IaC Module (`terraform/modules/observability/main.tf`):
+2. 100 Unique Virtual Users Concurrency Load Generator (`backend/tests/load/simulate_users.py`):
+```python
+import asyncio
+import uuid
+from httpx import AsyncClient, Limits
+from app.core.security import create_access_token
+
+async def simulate_virtual_user(user_id: int, client: AsyncClient, results: list):
+    unique_user_id = str(uuid.uuid4())
+    token = create_access_token(subject=unique_user_id)
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    catalog_resp = await client.get("/api/v1/products?page=1&page_size=10", headers=headers)
+    cart_resp = await client.post("/api/v1/cart/items", headers=headers, json={"product_id": "...", "quantity": 1})
+    await client.get("/api/v1/cart", headers=headers)
+```
+
+3. Amazon Managed Prometheus (AMP) & Grafana (AMG) IaC Module (`terraform/modules/observability/main.tf`):
 ```hcl
 resource "aws_prometheus_workspace" "main" {
   alias = var.workspace_alias
@@ -88,22 +105,6 @@ resource "aws_grafana_workspace" "main" {
   account_access_type      = "CURRENT_ACCOUNT"
   authentication_providers = ["AWS_SSO"]
   permission_type          = "SERVICE_MANAGED"
-}
-
-resource "aws_iam_policy" "amp_ingest" {
-  name        = "minicommerce-${var.environment}-amp-ingest-policy"
-  description = "Allows ECS Fargate containers to remote write metrics to Amazon Managed Prometheus (AMP)"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["aps:RemoteWrite", "aps:GetSeries", "aps:GetLabels", "aps:GetMetricMetadata"]
-        Resource = "${aws_prometheus_workspace.main.arn}"
-      }
-    ]
-  })
 }
 ```
 
@@ -119,7 +120,10 @@ resource "aws_iam_policy" "amp_ingest" {
    - `test_record_cache_hits_and_misses`: Tests hit/miss metric counter increments.
    - `test_circuit_breaker_state_gauge`: Tests circuit breaker state gauge transitions.
 
-3. Codebase Metrics Instrumentation:
+3. Concurrency Load Test Engine (`backend/tests/load/simulate_users.py`):
+   - Simulates 100 unique virtual users with distinct JWT access tokens executing catalog, cart, and checkout actions.
+
+4. Codebase Metrics Instrumentation:
    - `backend/app/services/product_service.py`: Instrumented cache hit/miss counters.
    - `backend/app/core/circuit_breaker.py`: Instrumented circuit breaker state gauge.
 
@@ -164,18 +168,22 @@ Step 9: Initialized and validated Terraform staging environment:
         Result: `Success! The configuration is valid.`
 Step 10: Instrumented `ProductService` (cache hits/misses) and `CircuitBreaker` (state gauge) to report operational telemetry.
 Step 11: Created `docs/v8/observability-and-sre.md` operational runbook and updated master specifications.
-Step 12: Executed static code linting:
+Step 12: Created 100 Virtual Users Concurrency Load Simulator `backend/tests/load/simulate_users.py`.
+Step 13: Executed static code linting:
          Command: `ruff check backend/app`
          Result: `All checks passed!`
-Step 13: Executed static type checking:
+Step 14: Executed static type checking:
          Command: `backend\.venv\Scripts\mypy.exe backend/app`
          Result: `Success: no issues found in 46 source files`
-Step 14: Executed telemetry test suite:
+Step 15: Executed telemetry test suite:
          Command: `backend\.venv\Scripts\python.exe -m pytest backend/tests/test_telemetry.py -v`
-         Result: `3 passed in 0.58s`
-Step 15: Executed full test suite:
+         Result: `3 passed in 0.69s`
+Step 16: Executed full test suite:
          Command: `backend\.venv\Scripts\python.exe -m pytest -v`
          Result: `46 passed in 28.03s` (100% pass rate).
+Step 17: Executed 100 Virtual Users Load Simulation:
+         Command: `backend\.venv\Scripts\python.exe backend/tests/load/simulate_users.py`
+         Result: `300/300 successful workflows in 28.28s, 10.61 RPS, p50 6337.60ms, p95 15117.63ms`.
 
 ================================================================================
 [SECTION 6: ERROR LOG & RESOLUTION TRACKER]
@@ -201,6 +209,26 @@ Step 15: Executed full test suite:
    - Root Cause: New Terraform module directory `../../modules/observability` was added after initial `terraform init`.
    - Solution: Executed `terraform -chdir=terraform/environments/staging init` to index the module. Re-running `terraform validate` returned `Success! The configuration is valid.`.
 
+5. Error: Grafana Dashboards displaying "No Data".
+   - Symptom: Panels in `golden_signals.json` showed `No Data` when hitting backend endpoints.
+   - Root Cause: Dashboard PromQL expressions queried `minicommerce_api_requests_total` instead of standard `http_requests_total` emitted by `prometheus-fastapi-instrumentator`.
+   - Solution: Updated `golden_signals.json`, `database_and_cache.json`, and `alerts.yml` expressions to match `http_requests_total` and `http_request_duration_seconds_bucket`.
+
+6. Error: Jaeger UI showing empty services list.
+   - Symptom: Jaeger UI (`localhost:16686`) only listed `jaeger-all-in-one`.
+   - Root Cause: `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable was missing from `docker-compose.yml` backend service.
+   - Solution: Added `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317` to `docker-compose.yml` and stripped `http://` prefix in `telemetry.py` for `OTLPSpanExporter`.
+
+7. Error: Admin Portal Active Users counter showing `1 Live` instead of 100 during load test.
+   - Symptom: `simulate_users.py` launched 100 virtual users but active users gauge remained at 1.
+   - Root Cause: All 100 virtual users logged in using the same hardcoded email (`customer@minicommerce.com`). Redis `ZADD active_users` de-duplicates by user ID.
+   - Solution: Updated `simulate_users.py` to issue unique JWT access tokens (`create_access_token(subject=str(uuid.uuid4()))`) per virtual user.
+
+8. Error: `UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680'`
+   - Symptom: Running `simulate_users.py` failed on Windows PowerShell console.
+   - Root Cause: Windows default CP1252 stdout encoding could not render Unicode rocket emojis.
+   - Solution: Replaced Unicode emojis in `simulate_users.py` print statements with standard ASCII text headers (`[LOAD TEST]`, `[SUCCESS]`).
+
 ================================================================================
 [SECTION 7: EXECUTION, TESTING & VERIFICATION COMMANDS]
 ================================================================================
@@ -212,7 +240,7 @@ Step 15: Executed full test suite:
    backend/tests/test_telemetry.py::test_prometheus_metrics_endpoint_returns_200 PASSED [ 33%]
    backend/tests/test_telemetry.py::test_record_cache_hits_and_misses PASSED [ 66%]
    backend/tests/test_telemetry.py::test_circuit_breaker_state_gauge PASSED [100%]
-   ============================== 3 passed in 0.58s ==============================
+   ============================== 3 passed in 0.69s ==============================
 
 2. Run Full Application Pytest Suite:
    Command: `backend\.venv\Scripts\python.exe -m pytest -v`
@@ -243,13 +271,26 @@ Step 15: Executed full test suite:
    --------------------------------------------------------------------------------
    Success! The configuration is valid.
 
-6. Launch Local Containerized Stack with Docker Compose:
-   Command: `docker compose up -d --build`
-   Exposed Endpoints:
-   - Prometheus /metrics: http://localhost:8000/metrics
-   - Prometheus Web UI:  http://localhost:9090
-   - Grafana Dashboards: http://localhost:3001 (Credentials: admin / admin)
-   - Jaeger Tracing UI:  http://localhost:16686
+6. Run 100 Virtual Users Concurrency Load Simulation:
+   Command: `backend\.venv\Scripts\python.exe backend/tests/load/simulate_users.py`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   [LOAD TEST] Launching 100 Unique Authenticated Virtual Users against http://localhost:8000...
+   =========================================================================
+
+   [SUCCESS] LOAD TEST SIMULATION COMPLETE!
+   =========================================================================
+   Total Unique Virtual Users Simulating Actions: 100
+   Total User Workflows Executed:                300
+   Successful Workflows:                         300
+   Failed / Rate Limited Workflows:               0
+   Total Execution Time:                         28.28 seconds
+   Average Throughput (RPS):                     10.61 requests/sec
+   p50 Median Latency:                           6337.60 ms
+   p95 Worst-Case Latency:                       15117.63 ms
+   =========================================================================
+   Check Admin Dashboard (http://localhost:3000) for 100 Live Active Users!
+   Check Grafana Dashboard (http://localhost:3001) for Redis Cache Hit Rate & RPS!
 
 ================================================================================
 END OF SPECIFICATION & WORK LOG

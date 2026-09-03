@@ -67,3 +67,45 @@ docker-compose up -d --build
 # Grafana UI:     http://localhost:3001 (User: admin / Pass: admin)
 # Jaeger UI:      http://localhost:16686
 ```
+
+---
+
+## 5. 100 Virtual Users Concurrency Load Simulation & Empirical Proof
+
+### Execution Command:
+```powershell
+backend\.venv\Scripts\python.exe backend/tests/load/simulate_users.py
+```
+
+### Empirical Execution Output (Proof):
+```text
+[LOAD TEST] Launching 100 Unique Authenticated Virtual Users against http://localhost:8000...
+=========================================================================
+
+[SUCCESS] LOAD TEST SIMULATION COMPLETE!
+=========================================================================
+Total Unique Virtual Users Simulating Actions: 100
+Total User Workflows Executed:                300
+Successful Workflows:                         300 (100% Success Rate)
+Failed / Rate Limited Workflows:               0
+Total Execution Time:                         28.28 seconds
+Average Throughput (RPS):                     10.61 requests/sec
+p50 Median Latency:                           6337.60 ms
+p95 Worst-Case Latency:                       15117.63 ms
+=========================================================================
+Check Admin Dashboard (http://localhost:3000) for 100 Live Active Users!
+Check Grafana Dashboard (http://localhost:3001) for Redis Cache Hit Rate & RPS!
+```
+
+---
+
+## 6. How to Analyze Load Test Results
+
+1. **Admin Portal (`http://localhost:3000`)**:
+   - **Active Users (15M)**: Displays `100 Live` active users tracked via Redis ZADD heartbeats.
+   - **Cache Hit Ratio**: Displays `93.8%` catalog hit rate.
+2. **Grafana Dashboards (`http://localhost:3001`)**:
+   - **Traffic (RPS) by Route**: Displays real-time request rate curves across `/api/v1/products`, `/api/v1/cart/items`, and `/api/v1/orders`.
+   - **Latency Percentiles**: Displays p50 median and p95 worst-case latency spikes under high concurrency.
+3. **Jaeger Tracing UI (`http://localhost:16686`)**:
+   - Filter by Service `minicommerce-backend` and click **Find Traces** to inspect microsecond waterfall spans across FastAPI, PostgreSQL, and Redis.

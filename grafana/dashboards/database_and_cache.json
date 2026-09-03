@@ -14,7 +14,7 @@
       "type": "gauge",
       "targets": [
         {
-          "expr": "((sum(rate(minicommerce_redis_cache_hits_total[5m])) or 0) / ((sum(rate(minicommerce_redis_cache_hits_total[5m])) or 0) + (sum(rate(minicommerce_redis_cache_misses_total[5m])) or 1))) * 100",
+          "expr": "(sum(minicommerce_redis_cache_hits_total) / (sum(minicommerce_redis_cache_hits_total) + sum(minicommerce_redis_cache_misses_total))) * 100",
           "legendFormat": "Hit Rate %"
         }
       ]

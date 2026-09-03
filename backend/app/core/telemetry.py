@@ -99,6 +99,8 @@ def setup_telemetry(app: FastAPI) -> Instrumentator:
     CIRCUIT_BREAKER_STATE.labels(name="redis_cache").set(0)
     OUTBOX_PENDING.set(0)
     OUTBOX_DLQ.set(0)
+    REDIS_CACHE_HITS.inc(0)
+    REDIS_CACHE_MISSES.inc(0)
 
     # Initialize Prometheus Instrumentator
     instrumentator = Instrumentator(

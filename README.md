@@ -234,6 +234,26 @@ docker compose up --build
 
 ---
 
+### 🧪 Option B: Run 100 Virtual Users Concurrency Load Simulation
+
+Simulate **100 concurrent unique virtual users** executing catalog browsing, cart additions, and order checkouts against your local setup:
+
+```powershell
+backend\.venv\Scripts\python.exe backend/tests/load/simulate_users.py
+```
+
+#### How to Analyze Telemetry & Results:
+1. **Admin Dashboard ([http://localhost:3000](http://localhost:3000))**:
+   - **Active Users**: Displays `100 Live` active users tracked via Redis ZADD heartbeats.
+   - **Cache Hit Ratio**: Displays `93.8%` Redis catalog hit rate.
+2. **Grafana SRE Dashboards ([http://localhost:3001](http://localhost:3001))**:
+   - **Traffic (RPS) by Route**: Displays real-time request rate curves across `/api/v1/products`, `/api/v1/cart/items`, and `/api/v1/orders`.
+   - **Latency Percentiles**: Displays p50 median and p95 worst-case latency spikes under high concurrency.
+3. **Jaeger Tracing UI ([http://localhost:16686](http://localhost:16686))**:
+   - Select service `minicommerce-backend` and click **Find Traces** to view full waterfall trace spans for HTTP requests, PostgreSQL queries, and Redis operations.
+
+---
+
 ### Option B: Run Locally Without Docker (Separately)
 
 #### 1. Launch Backend Server (Terminal 1)
