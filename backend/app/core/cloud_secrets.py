@@ -22,6 +22,8 @@ def get_secret(secret_name: str, region_name: str = "us-east-1") -> str | None:
         if "SecretString" in response:
             return response["SecretString"]
     except (ImportError, BotoCoreError, ClientError, Exception) as e:
-        logger.warning(f"Unable to fetch AWS secret '{secret_name}': {e}. Falling back to local env.")
+        logger.warning(
+            f"Unable to fetch AWS secret '{secret_name}': {e}. Falling back to local env."
+        )
 
     return None
