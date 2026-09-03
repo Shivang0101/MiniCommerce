@@ -1,0 +1,78 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "API Request Latency Percentiles (p50, p95, p99)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50 Latency"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 Latency"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99 Latency"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "title": "Traffic: Requests Per Second (RPS) by Route",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m])) by (handler)",
+          "legendFormat": "{{handler}}"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "title": "HTTP Error Rate Percentage (4xx / 5xx)",
+      "type": "gauge",
+      "targets": [
+        {
+          "expr": "((sum(rate(http_requests_total{status=~\"[45]..\"}[5m])) or 0) / (sum(rate(http_requests_total[5m])) or 1)) * 100",
+          "legendFormat": "Error Rate %"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "title": "DB Connection Pool Saturation",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minicommerce_db_pool_connections_active",
+          "legendFormat": "Active Connections"
+        },
+        {
+          "expr": "minicommerce_db_pool_connections_idle",
+          "legendFormat": "Idle Connections"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["sre", "golden-signals", "minicommerce"],
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "MiniCommerce SRE - 4 Golden Signals",
+  "uid": "minicommerce-golden-signals"
+}

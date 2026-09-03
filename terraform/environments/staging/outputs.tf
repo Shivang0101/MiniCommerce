@@ -22,3 +22,13 @@ output "ecs_cluster_name" {
   description = "Name of the ECS Fargate cluster"
   value       = module.ecs.cluster_name
 }
+
+output "amp_prometheus_endpoint" {
+  description = "Endpoint URL of Amazon Managed Prometheus (AMP) workspace"
+  value       = module.observability.amp_prometheus_endpoint
+}
+
+output "amg_workspace_endpoint" {
+  description = "Dashboard URL of Amazon Managed Grafana (AMG) workspace"
+  value       = module.observability.amg_workspace_endpoint
+}

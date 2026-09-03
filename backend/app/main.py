@@ -5,6 +5,7 @@ from app.api.v1.health import health_router
 from app.api.v1.router import api_v1_router
 from app.core.errors import api_exception_handler
 from app.core.redis import close_redis_pool, init_redis_pool
+from app.core.telemetry import setup_telemetry
 from app.db.base import Base
 from app.db.session import engine
 from app.middleware.logging import LoggingMiddleware
@@ -52,11 +53,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="MiniCommerce V5 Laboratory",
-    description="Enterprise Security, Distributed Resilience & Advanced Data Engineering Laboratory",
-    version="5.0.0",
+    title="MiniCommerce V8 Laboratory",
+    description="Enterprise Observability, Site Reliability Engineering & Cloud Architecture Laboratory",
+    version="8.0.0",
     lifespan=lifespan,
 )
+
+# Setup Prometheus metrics exporter and OpenTelemetry tracing
+setup_telemetry(app)
 
 
 # Exception handlers

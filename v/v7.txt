@@ -95,8 +95,8 @@ resource "aws_subnet" "public" {
 3. Architecture Runbook (`docs/v7/aws-cloud-architecture.md`):
    - Complete operational documentation detailing cloud topology and deployment runbooks.
 
-4. Terraform Run Log (`docs/v7/terraform_run.txt`):
-   - Complete output capture of 59-resource execution plan.
+4. Post-Mortem & Troubleshooting Guide (`docs/v7/v7_postmortem_and_troubleshooting.md`):
+   - Complete log evidence, root causes, and resolutions for all 7 cloud deployment challenges.
 
 ================================================================================
 [SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES]
@@ -120,84 +120,88 @@ terraform/
     └── iam_and_secrets/
 
 ================================================================================
-[SECTION 5: STEP-BY-STEP WORK LOG]
+[SECTION 5: COMPLETE TROUBLESHOOTING LOG & RESOLUTIONS (ALL 7 ISSUES)]
 ================================================================================
 
-1. Created `explain.txt` guide breaking down IaC, local validation, and AWS safety controls.
-2. Installed CLI prerequisites (`HashiCorp.Terraform` v1.15.8 and `Amazon.AWSCLI` v2.36.33).
-3. Generated AWS Access Keys via IAM Console (`AKIA...` Access Key ID & Secret Access Key).
-4. Configured AWS CLI credentials via `aws configure` (region: `us-east-1`, format: `json`).
-5. Created `terraform/modules/vpc` (VPC, Public/Private subnets, Internet/NAT Gateways).
-6. Created `terraform/modules/rds` (PostgreSQL 15 Multi-AZ, KMS encryption, DB subnet group).
-7. Created `terraform/modules/elasticache` (Redis 7 cluster, TLS Transit/At-Rest encryption).
-8. Created `terraform/modules/alb` (Application Load Balancer, target groups, path routing).
-9. Created `terraform/modules/ecs` (ECS Fargate cluster, task definitions, Target Tracking Auto-Scaling).
-10. Created `terraform/modules/iam_and_secrets` (IAM execution/task roles & Secrets Manager).
-11. Created `terraform/environments/staging` root configuration layout.
-12. Created `backend/app/core/cloud_secrets.py` and updated `backend/requirements.txt`.
-13. Formatted all HCL code (`terraform fmt -recursive terraform/`).
-14. Initialized provider plugins (`terraform init -backend=false` in staging).
-15. Successfully validated configuration (`terraform validate` -> `Success! The configuration is valid.`).
-16. Executed dry-run execution plan (`terraform plan`) generating 59 AWS resources to add.
-17. Saved full plan output to `docs/v7/terraform_run.txt`.
-18. Executed full Pytest backend test suite (`43/43 passed in 29.79s`).
+1. Error: `FreeTierRestrictionError` / `InvalidParameterCombination`
+   - Symptom: Backup retention period (>1 day) or unsupported exact engine version (`15.3`) failed creation.
+   - Root Cause: AWS RDS Free Tier restricts retention period to 1 day.
+   - Solution: Set `backup_retention_period = 1`, `performance_insights_enabled = false`, and `engine_version = "15"` in `terraform/modules/rds/main.tf`.
+
+2. Error: `CannotPullContainerError`
+   - Symptom: ECS task stuck in `STOPPED` state with `failed to resolve ref ghcr.io...`.
+   - Root Cause: Fargate tasks in private subnets without public egress cannot reach `ghcr.io`.
+   - Solution: Attached ECS tasks to public subnets (`public_subnet_ids`) and enabled `assign_public_ip = true` in `terraform/modules/ecs/main.tf`.
+
+3. Error: `401 Unauthorized` on container pull
+   - Symptom: Fargate tasks fail image pull despite public IP assignment.
+   - Root Cause: GitHub Container Registry (GHCR) sets new container packages to Private by default.
+   - Solution: Changed visibility of `minicommerce-backend`, `minicommerce-worker`, and `minicommerce-frontend` packages to **Public** in GitHub Package Settings.
+
+4. Error: `sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) near "EXISTS": syntax error` -> `504`
+   - Symptom: Backend container crashed on startup causing 504 Gateway Timeout.
+   - Root Cause: `ALTER TABLE ... IF NOT EXISTS` is valid in PostgreSQL 15 but crashes SQLite test environments.
+   - Solution: Gated migrations inside `if engine.dialect.name == "postgresql":` and wrapped in try/except blocks in `backend/app/main.py`.
+
+5. Error: `Failed to initialize Redis pool on startup: Timeout reading from master.minicommerce-staging-redis...`
+   - Symptom: Redis connection timeout on startup.
+   - Root Cause: `backend/app/core/redis.py` hardcoded `socket_connect_timeout=0.5` (500ms). Network connections across AWS subnets took ~0.8s, causing socket timeouts. Additionally, ElastiCache TLS requires `rediss://`.
+   - Solution: Increased `socket_connect_timeout=3.0` in `redis.py` and set `REDIS_URL = "rediss://..."` scheme in `terraform/modules/ecs/main.tf`.
+
+6. Error: `InvalidParameterCombination: Modification of transit encryption is not supported`
+   - Symptom: `terraform apply` failed when modifying replication group.
+   - Root Cause: AWS ElastiCache API forbids toggling transit encryption live on an existing cluster with AUTH token without recreation.
+   - Solution: Added `apply_immediately = true` and retained `transit_encryption_enabled = true` in `terraform/modules/elasticache/main.tf`.
+
+7. Error: `[emerg] host not found in upstream "backend" in default.conf:13` -> `503`
+   - Symptom: Root URL `http://minicommerce-staging-alb.../` returned 503.
+   - Root Cause: `frontend/nginx.conf` contained local Docker-Compose `proxy_pass http://backend:8000/api/`. On AWS, ALB handles path routing (`/api/*` -> backend, `/*` -> frontend). Nginx crashed looking for Docker host `backend:8000`.
+   - Solution: Removed Docker-only `proxy_pass` blocks from `frontend/nginx.conf` so Nginx focuses strictly on React SPA static delivery (`/usr/share/nginx/html`).
 
 ================================================================================
-[SECTION 6: ERROR LOG & RESOLUTION TRACKER]
+[SECTION 6: COMPLETE STEP-BY-STEP RE-DEPLOYMENT & MANAGEMENT RUNBOOK]
 ================================================================================
 
-1. Error: `ModuleNotFoundError: No module named 'arq'`
-   Symptom: `python -m pytest tests` failed when run with system Python.
-   Root Cause: System python interpreter lacked local virtual environment packages.
-   Solution: Invoked pytest using virtual environment binary: `.\.venv\Scripts\python.exe -m pytest tests`.
+--- HOW TO RE-DEPLOY / LAUNCH LIVE AWS CLOUD ENVIRONMENT NEXT TIME ---
 
-2. Error: `Error: No valid credential sources found`
-   Symptom: `terraform plan` failed with `failed to refresh cached credentials` error.
-   Root Cause: AWS CLI credentials (`aws configure`) were not yet configured locally.
-   Solution: Generated Access Key ID & Secret Access Key in AWS IAM Console and executed `aws configure`.
-
-================================================================================
-[SECTION 7: COMPLETE STEP-BY-STEP EXECUTION & SETUP GUIDE]
-================================================================================
-
-STEP 1: INSTALL TOOL PREREQUISITES (PowerShell):
-   winget install HashiCorp.Terraform
-   winget install Amazon.AWSCLI
-
-STEP 2: GENERATE AWS ACCESS KEYS (AWS Web Console):
-   1. Log into AWS Console (https://aws.amazon.com) -> Go to IAM service.
-   2. Select Users -> Create User (e.g. `developer-cli`) -> Attach `AdministratorAccess` policy.
-   3. Go to Security Credentials tab -> Create Access Key -> Select CLI.
-   4. Copy Access Key ID (AKIA...) and Secret Access Key.
-
-STEP 3: CONFIGURE AWS CLI (PowerShell):
+STEP 1: CONFIGURE AWS CLI CREDENTIALS (PowerShell):
    aws configure
-   - AWS Access Key ID: <paste AKIA...>
-   - AWS Secret Access Key: <paste secret key>
-   - Default region name: us-east-1
-   - Default output format: json
+   (Set region to `us-east-1`, paste Access Key ID & Secret Access Key)
 
-STEP 4: LOCAL TERRAFORM INITIALIZATION & VALIDATION (0 AWS Cost):
+STEP 2: NAVIGATE TO STAGING TERRAFORM DIRECTORY:
    cd terraform/environments/staging
-   terraform init -backend=false
+
+STEP 3: INITIALIZE & VALIDATE TERRAFORM (0 AWS Cost):
+   terraform init
    terraform validate
 
-STEP 5: DRY-RUN EXECUTION PLAN (0 AWS Cost, Read-Only):
-   cd terraform/environments/staging
-   terraform plan
-
-STEP 6: APPLY LIVE AWS DEPLOYMENT (Optional):
-   cd terraform/environments/staging
+STEP 4: APPLY INFRASTRUCTURE DEPLOYMENT (59 AWS Resources):
    terraform apply
+   (Type 'yes' when prompted)
 
-STEP 7: DESTROY AWS DEPLOYMENT (Clean Teardown):
+STEP 5: SEED AWS RDS POSTGRESQL DATABASE (1-Shot Fargate Task):
+   aws ecs run-task --cluster minicommerce-staging-cluster --task-definition minicommerce-staging-backend --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[subnet-08f138f4b46b5e801],securityGroups=[sg-01a40f0dd95ba932a],assignPublicIp=ENABLED}" --overrides '{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"app/db/seed.py\"]}]}' --region us-east-1
+
+STEP 6: ACCESS LIVE CLOUD APPLICATION & API DOCS:
+   - ALB URL: http://minicommerce-staging-alb-1653947422.us-east-1.elb.amazonaws.com
+   - API Docs: http://minicommerce-staging-alb-1653947422.us-east-1.elb.amazonaws.com/docs
+   - Products API: http://minicommerce-staging-alb-1653947422.us-east-1.elb.amazonaws.com/api/v1/products
+
+STEP 7: FORCE ECS SERVICE RE-DEPLOYMENTS (When pushing code updates):
+   aws ecs update-service --cluster minicommerce-staging-cluster --service minicommerce-staging-backend-service --force-new-deployment --region us-east-1
+   aws ecs update-service --cluster minicommerce-staging-cluster --service minicommerce-staging-worker-service --force-new-deployment --region us-east-1
+   aws ecs update-service --cluster minicommerce-staging-cluster --service minicommerce-staging-frontend-service --force-new-deployment --region us-east-1
+
+STEP 8: TAIL LIVE CONTAINER CLOUDWATCH LOGS (For Debugging):
+   aws logs tail /ecs/minicommerce-staging-backend --region us-east-1 --since 5m
+   aws logs tail /ecs/minicommerce-staging-worker --region us-east-1 --since 5m
+   aws logs tail /ecs/minicommerce-staging-frontend --region us-east-1 --since 5m
+
+STEP 9: CLEAN TEARDOWN & DELETE AWS INFRASTRUCTURE (0 Remaining Cost):
    cd terraform/environments/staging
    terraform destroy
-
-STEP 8: BACKEND UNIT TEST SUITE:
-   cd backend
-   .\.venv\Scripts\python.exe -m pytest tests
+   (Type 'yes' when prompted; deletes all 59 provisioned AWS resources cleanly)
 
 ================================================================================
-END OF SPECIFICATION
+END OF SPECIFICATION & WORK LOG
 ================================================================================

@@ -55,8 +55,14 @@ test_temp.db
 # Testing & Coverage
 .pytest_cache/
 backend/.pytest_cache/
+.ruff_cache/
+backend/.ruff_cache/
 .coverage
 htmlcov/
+
+# Telemetry & Observability Data Storage
+prometheus_data/
+grafana_data/
 
 # IDEs and Editors
 .vscode/
@@ -72,3 +78,10 @@ Thumbs.db
 blog/
 abcd.txt
 implementation_plan.txt
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

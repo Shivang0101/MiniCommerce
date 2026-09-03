@@ -98,3 +98,11 @@ module "elasticache" {
   num_cache_clusters    = 1
   auth_token            = var.redis_auth_token
 }
+
+# 7. Amazon Managed Prometheus (AMP) & Grafana (AMG) Observability Module
+module "observability" {
+  source          = "../../modules/observability"
+  environment     = var.environment
+  workspace_alias = "minicommerce-${var.environment}-prometheus"
+  grafana_name    = "minicommerce-${var.environment}-grafana"
+}

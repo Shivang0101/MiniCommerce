@@ -1,0 +1,38 @@
+groups:
+  - name: minicommerce_alerts
+    rules:
+      - alert: HighFiveHundredErrorRate
+        expr: (sum(rate(http_requests_total{status=~"5.."}[2m])) / sum(rate(http_requests_total[2m]))) * 100 > 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate detected on MiniCommerce API"
+          description: "5xx error rate is currently {{ $value }}% over the last 2 minutes."
+
+      - alert: CircuitBreakerOpen
+        expr: minicommerce_circuit_breaker_state == 2
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Downstream circuit breaker tripped to OPEN state"
+          description: "Circuit breaker {{ $labels.name }} is OPEN."
+
+      - alert: OutboxDLQBacklog
+        expr: minicommerce_outbox_events_dlq_total > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead-Letter Queue (DLQ) backlog threshold exceeded"
+          description: "DLQ backlog has {{ $value }} unhandled events."
+
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 API response duration"
+          description: "95th percentile latency is {{ $value }}s over 5 minutes."

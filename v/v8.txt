@@ -1,0 +1,256 @@
+================================================================================
+MINICOMMERCE V8 LABORATORY - MASTER VERSION 8 SPECIFICATION & WORK LOG
+================================================================================
+
+[SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS]
+--------------------------------------------------------------------------------
+Version 8 establishes enterprise-grade observability, telemetry collection, 
+custom SRE alerting rules, OpenTelemetry distributed tracing, automated unit/integration
+tests, and pre-built Grafana dashboards across local Docker environments and AWS Cloud Infrastructure.
+
+ASCII Observability Architecture & Data Flows:
+
++-------------------------------------------------------------------------------+
+|                      MINICOMMERCE V8 OBSERVABILITY ECOSYSTEM                  |
++-------------------------------------------------------------------------------+
+
+[LOCAL DEVELOPMENT (Docker Compose)]
+                                 
+      +------------------------+      Scrape /metrics     +-----------------------+
+      | FastAPI Backend App    | -----------------------> | Prometheus Container  |
+      | (app/core/telemetry.py)|                          | Port 9090             |
+      +------------------------+                          +-----------------------+
+                   │                                                  │
+                   │ OTLP Traces (gRPC)                               │ Data Query
+                   ▼                                                  ▼
+      +------------------------+                          +-----------------------+
+      | Jaeger UI Container    |                          | Grafana UI Container  |
+      | Port 16686             |                          | Port 3001             |
+      +------------------------+                          +-----------------------+
+
+[AWS CLOUD INFRASTRUCTURE (Terraform IaC)]
+
+      +------------------------+     ADOT / OTLP Stream   +-----------------------+
+      | AWS ECS Fargate Task   | -----------------------> | Amazon Managed        |
+      | (Backend Container)    |                          | Prometheus (AMP)      |
+      +------------------------+                          +-----------------------+
+                                                                      │
+                                                                      │ Data Source
+                                                                      ▼
+                                                          +-----------------------+
+                                                          | Amazon Managed        |
+                                                          | Grafana (AMG)         |
+                                                          +-----------------------+
+
+================================================================================
+[SECTION 2: NEW TECHNOLOGIES & CORE CODE SNIPPETS]
+================================================================================
+
+1. Prometheus Metrics Exporter Engine (`backend/app/core/telemetry.py`):
+```python
+from prometheus_client import Counter, Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "minicommerce_http_requests_total",
+    "Total HTTP requests received",
+    ["method", "handler", "status"],
+)
+
+REDIS_CACHE_HITS = Counter(
+    "minicommerce_redis_cache_hits_total",
+    "Total Redis cache hits",
+)
+
+CIRCUIT_BREAKER_STATE = Gauge(
+    "minicommerce_circuit_breaker_state",
+    "Circuit breaker state (0=CLOSED, 1=HALF-OPEN, 2=OPEN)",
+    ["name"],
+)
+
+def setup_telemetry(app: FastAPI) -> Instrumentator:
+    instrumentator = Instrumentator(
+        should_group_status_codes=False,
+        should_ignore_untemplated=True,
+    )
+    instrumentator.instrument(app).expose(app, endpoint="/metrics", tags=["telemetry"])
+    return instrumentator
+```
+
+2. Amazon Managed Prometheus (AMP) & Grafana (AMG) IaC Module (`terraform/modules/observability/main.tf`):
+```hcl
+resource "aws_prometheus_workspace" "main" {
+  alias = var.workspace_alias
+}
+
+resource "aws_grafana_workspace" "main" {
+  name                     = var.grafana_name
+  account_access_type      = "CURRENT_ACCOUNT"
+  authentication_providers = ["AWS_SSO"]
+  permission_type          = "SERVICE_MANAGED"
+}
+
+resource "aws_iam_policy" "amp_ingest" {
+  name        = "minicommerce-${var.environment}-amp-ingest-policy"
+  description = "Allows ECS Fargate containers to remote write metrics to Amazon Managed Prometheus (AMP)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["aps:RemoteWrite", "aps:GetSeries", "aps:GetLabels", "aps:GetMetricMetadata"]
+        Resource = "${aws_prometheus_workspace.main.arn}"
+      }
+    ]
+  })
+}
+```
+
+================================================================================
+[SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS]
+================================================================================
+
+1. New Exposition Endpoint (`GET /metrics`):
+   - Exposes standard Prometheus text metrics format for automated scraping.
+
+2. Automated Telemetry Pytest Suite (`backend/tests/test_telemetry.py`):
+   - `test_prometheus_metrics_endpoint_returns_200`: Asserts HTTP 200 and text/plain response.
+   - `test_record_cache_hits_and_misses`: Tests hit/miss metric counter increments.
+   - `test_circuit_breaker_state_gauge`: Tests circuit breaker state gauge transitions.
+
+3. Codebase Metrics Instrumentation:
+   - `backend/app/services/product_service.py`: Instrumented cache hit/miss counters.
+   - `backend/app/core/circuit_breaker.py`: Instrumented circuit breaker state gauge.
+
+================================================================================
+[SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES]
+================================================================================
+
+1. Prometheus Scraper & Alertmanager Rules:
+   - `prometheus/prometheus.yml`: Configured 15s scrape interval targeting `backend:8000`.
+   - `prometheus/alerts.yml`: SRE rules for 5xx error rate (>2%), CircuitBreakerOpen, DLQ backlog (>5), and p95 latency (>500ms).
+
+2. Grafana Provisioning & Dashboards:
+   - `grafana/provisioning/datasources/prometheus.yml`: Auto-provisions Prometheus datasource.
+   - `grafana/provisioning/dashboards/dashboards.yml`: Auto-loads dashboard JSON files.
+   - `grafana/dashboards/golden_signals.json`: The 4 Golden Signals (Latency p50/p95/p99, RPS, Error rate, Saturation).
+   - `grafana/dashboards/database_and_cache.json`: DB active connections, Redis cache hit rate, circuit breaker state timeline, outbox DLQ.
+
+3. Docker Compose Orchestration (`docker-compose.yml`):
+   - Added `prometheus` (port 9090), `grafana` (port 3001), and `jaeger` (ports 16686, 4317, 4318).
+
+4. Terraform AWS Infrastructure (`terraform/modules/observability/`):
+   - Added AMP workspace, AMG workspace, and IAM remote-write policies.
+
+================================================================================
+[SECTION 5: STEP-BY-STEP WORK LOG & COMMANDS EXECUTED]
+================================================================================
+
+Step 1: Added telemetry packages to `backend/requirements.txt`.
+Step 2: Installed dependencies into virtual environment:
+        Command: `backend\.venv\Scripts\pip.exe install prometheus-fastapi-instrumentator prometheus-client opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-sqlalchemy opentelemetry-instrumentation-redis`
+        Result: Successfully installed 24 packages into `backend/.venv`.
+Step 3: Implemented `backend/app/core/telemetry.py` custom metrics, gauges, counters, histograms, and OpenTelemetry OTLP tracing setup.
+Step 4: Wired `setup_telemetry(app)` into `backend/app/main.py`.
+Step 5: Created automated telemetry Pytest suite `backend/tests/test_telemetry.py`.
+Step 6: Created `prometheus/prometheus.yml`, `prometheus/alerts.yml`, Grafana provisioning files, and pre-built JSON dashboards.
+Step 7: Updated `docker-compose.yml` with Prometheus, Grafana, and Jaeger services.
+Step 8: Created Terraform IaC module `terraform/modules/observability/` (`main.tf`, `variables.tf`, `outputs.tf`) and instantiated module in `terraform/environments/staging/main.tf` & `outputs.tf`.
+Step 9: Initialized and validated Terraform staging environment:
+        Command: `terraform -chdir=terraform/environments/staging init`
+        Result: `Terraform has been successfully initialized!`
+        Command: `terraform -chdir=terraform/environments/staging validate`
+        Result: `Success! The configuration is valid.`
+Step 10: Instrumented `ProductService` (cache hits/misses) and `CircuitBreaker` (state gauge) to report operational telemetry.
+Step 11: Created `docs/v8/observability-and-sre.md` operational runbook and updated master specifications.
+Step 12: Executed static code linting:
+         Command: `ruff check backend/app`
+         Result: `All checks passed!`
+Step 13: Executed static type checking:
+         Command: `backend\.venv\Scripts\mypy.exe backend/app`
+         Result: `Success: no issues found in 46 source files`
+Step 14: Executed telemetry test suite:
+         Command: `backend\.venv\Scripts\python.exe -m pytest backend/tests/test_telemetry.py -v`
+         Result: `3 passed in 0.58s`
+Step 15: Executed full test suite:
+         Command: `backend\.venv\Scripts\python.exe -m pytest -v`
+         Result: `46 passed in 28.03s` (100% pass rate).
+
+================================================================================
+[SECTION 6: ERROR LOG & RESOLUTION TRACKER]
+================================================================================
+
+1. Error: `ModuleNotFoundError: No module named 'prometheus_client'`
+   - Symptom: Pytest loading failed in `backend/tests/conftest.py`.
+   - Root Cause: Newly added telemetry packages in `backend/requirements.txt` were not yet installed inside the `.venv` virtual environment.
+   - Solution: Executed `backend\.venv\Scripts\pip.exe install ...` installing `prometheus-client`, `prometheus-fastapi-instrumentator`, and `opentelemetry` SDKs.
+
+2. Error: `TypeError: PrometheusFastApiInstrumentator.__init__() got an unexpected keyword argument 'should_instrument_requests_key'`
+   - Symptom: Pytest initialization failed on `setup_telemetry(app)` call in `main.py`.
+   - Root Cause: `prometheus-fastapi-instrumentator` v8.1.0 changed `__init__` constructor parameter names.
+   - Solution: Refactored `Instrumentator` initialization in `backend/app/core/telemetry.py` to use standard positional/keyword arguments (`should_group_status_codes=False, should_ignore_untemplated=True`).
+
+3. Error: `F401 [*] 'typing.Any' imported but unused`
+   - Symptom: `ruff check backend/app` failed with exit code 1.
+   - Root Cause: Unused import `from typing import Any` left in `backend/app/core/telemetry.py`.
+   - Solution: Removed `from typing import Any` line from `backend/app/core/telemetry.py`. Re-running `ruff check backend/app` returned `All checks passed!`.
+
+4. Error: `Error: Module not installed` during Terraform validation.
+   - Symptom: `terraform validate` returned missing module error for `module "observability"`.
+   - Root Cause: New Terraform module directory `../../modules/observability` was added after initial `terraform init`.
+   - Solution: Executed `terraform -chdir=terraform/environments/staging init` to index the module. Re-running `terraform validate` returned `Success! The configuration is valid.`.
+
+================================================================================
+[SECTION 7: EXECUTION, TESTING & VERIFICATION COMMANDS]
+================================================================================
+
+1. Run Automated Pytest Telemetry Suite:
+   Command: `backend\.venv\Scripts\python.exe -m pytest backend/tests/test_telemetry.py -v`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   backend/tests/test_telemetry.py::test_prometheus_metrics_endpoint_returns_200 PASSED [ 33%]
+   backend/tests/test_telemetry.py::test_record_cache_hits_and_misses PASSED [ 66%]
+   backend/tests/test_telemetry.py::test_circuit_breaker_state_gauge PASSED [100%]
+   ============================== 3 passed in 0.58s ==============================
+
+2. Run Full Application Pytest Suite:
+   Command: `backend\.venv\Scripts\python.exe -m pytest -v`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   ============================= 46 passed in 28.03s =============================
+
+3. Run Ruff Code Formatting & Linting:
+   Command: `ruff check backend/app`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   All checks passed!
+
+4. Run Mypy Static Type Verification:
+   Command: `backend\.venv\Scripts\mypy.exe backend/app`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   Success: no issues found in 46 source files
+
+5. Initialize & Validate Terraform Staging Environment:
+   Command: `terraform -chdir=terraform/environments/staging init`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   Terraform has been successfully initialized!
+
+   Command: `terraform -chdir=terraform/environments/staging validate`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   Success! The configuration is valid.
+
+6. Launch Local Containerized Stack with Docker Compose:
+   Command: `docker compose up -d --build`
+   Exposed Endpoints:
+   - Prometheus /metrics: http://localhost:8000/metrics
+   - Prometheus Web UI:  http://localhost:9090
+   - Grafana Dashboards: http://localhost:3001 (Credentials: admin / admin)
+   - Jaeger Tracing UI:  http://localhost:16686
+
+================================================================================
+END OF SPECIFICATION & WORK LOG
+================================================================================

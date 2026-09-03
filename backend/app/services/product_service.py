@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal
 
+from app.core.telemetry import record_cache_hit, record_cache_miss
 from app.models.product import Product
 from app.repositories.product_repository import ProductRepository
 from app.schemas.product import ProductCreate
@@ -39,9 +40,12 @@ class ProductService:
         cached_data = await CacheService.get(cache_key)
 
         if cached_data is not None:
+            record_cache_hit()
             # Reconstruct Product ORM instances from cached dict list
             products = [Product(**item) for item in cached_data["products"]]
             return products, cached_data["total_count"]
+
+        record_cache_miss()
 
         products, total_count = await ProductRepository.list_products(
             db,

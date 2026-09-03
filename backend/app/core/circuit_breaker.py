@@ -49,12 +49,22 @@ class CircuitBreaker:
                 if now - self.last_state_change >= self.recovery_time_seconds:
                     self.state = CircuitState.HALF_OPEN
                     self.last_state_change = now
+                    self._update_telemetry()
                     logger.info(
                         f"Circuit Breaker '{self.name}' transitioning from OPEN -> HALF_OPEN"
                     )
                     return True
                 return False
             return True
+
+    def _update_telemetry(self):
+        try:
+            from app.core.telemetry import update_circuit_breaker_state
+
+            val_map = {CircuitState.CLOSED: 0, CircuitState.HALF_OPEN: 1, CircuitState.OPEN: 2}
+            update_circuit_breaker_state(self.name, val_map.get(self.state, 0))
+        except Exception:
+            pass
 
     async def record_success(self):
         async with self._lock:
@@ -64,6 +74,7 @@ class CircuitBreaker:
             if self.state == CircuitState.HALF_OPEN:
                 self.state = CircuitState.CLOSED
                 self.last_state_change = now
+                self._update_telemetry()
                 logger.info(
                     f"Circuit Breaker '{self.name}' transitioning from HALF_OPEN -> CLOSED (Recovered)"
                 )
@@ -78,6 +89,7 @@ class CircuitBreaker:
             if self.state == CircuitState.HALF_OPEN:
                 self.state = CircuitState.OPEN
                 self.last_state_change = now
+                self._update_telemetry()
                 logger.warning(
                     f"Circuit Breaker '{self.name}' failed in HALF_OPEN -> Tripping to OPEN"
                 )
@@ -86,6 +98,7 @@ class CircuitBreaker:
                 if fail_rate >= self.failure_threshold:
                     self.state = CircuitState.OPEN
                     self.last_state_change = now
+                    self._update_telemetry()
                     logger.warning(
                         f"Circuit Breaker '{self.name}' failure rate {fail_rate:.2f} >= threshold {self.failure_threshold:.2f} -> Tripping to OPEN for {self.recovery_time_seconds}s"
                     )

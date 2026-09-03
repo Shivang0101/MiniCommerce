@@ -1,14 +1,20 @@
-# 🛒 MiniCommerce — Enterprise AWS Cloud Architecture, IaC & Distributed Resilience (V7)
+# 🛒 MiniCommerce — Enterprise AWS Cloud Architecture, Observability & Distributed Resilience (V8)
 
 Welcome to **MiniCommerce**, an evolving, production-grade backend engineering, cloud architecture, and system design laboratory. 
 
-MiniCommerce serves as a benchmark laboratory for exploring **Infrastructure as Code (Terraform)**, **AWS Cloud Architecture (VPC, ECS Fargate, RDS PostgreSQL, ElastiCache Redis, ALB)**, **high-throughput backend patterns**, **database optimization**, **pessimistic concurrency control**, **in-memory distributed caching**, **asynchronous task offloading**, **sliding-window rate limiting**, **zero-trust dual-token rotation**, **distributed resilience patterns**, **automated CI/CD pipelines**, and **cloud container delivery**.
+MiniCommerce serves as a benchmark laboratory for exploring **Infrastructure as Code (Terraform)**, **AWS Cloud Architecture (VPC, ECS Fargate, RDS PostgreSQL, ElastiCache Redis, ALB)**, **Amazon Managed Prometheus (AMP) & Amazon Managed Grafana (AMG)**, **Prometheus Telemetry & Grafana SRE Dashboards**, **OpenTelemetry Distributed Tracing**, **high-throughput backend patterns**, **database optimization**, **pessimistic concurrency control**, **in-memory distributed caching**, **asynchronous task offloading**, **sliding-window rate limiting**, **zero-trust dual-token rotation**, **distributed resilience patterns**, **automated CI/CD pipelines**, and **cloud container delivery**.
 
 ---
 
-## 🚀 Key System Features (Version 7 Current State)
+## 🚀 Key System Features (Version 8 Current State)
 
-- **🏗️ Infrastructure as Code (IaC) via Terraform**: 6 production-grade reusable HCL modules in `terraform/modules/` (`vpc`, `rds`, `elasticache`, `alb`, `ecs`, `iam_and_secrets`) provisioning 59 AWS cloud resources with zero manual click-ops.
+- **📊 Prometheus Telemetry Engine & Exporter (`/metrics`)**: Exposes standard Prometheus metrics format on `GET /metrics` via `prometheus-fastapi-instrumentator` with custom SRE metrics (`http_requests_total`, `http_request_duration_seconds`, `db_pool_connections_active`, `redis_cache_hits_total`, `redis_cache_misses_total`, `circuit_breaker_state`, `outbox_events_pending_total`, `outbox_events_dlq_total`).
+- **📈 Pre-Built Grafana SRE Dashboards**: Auto-provisioned Grafana dashboards (`golden_signals.json` for p50/p95/p99 Latency, RPS by route, Error % gauge, Saturation; `database_and_cache.json` for DB connection pool utilization, Redis hit rate %, Circuit Breakers timeline, Outbox DLQ).
+- **🚨 SRE Alertmanager Rules (`alerts.yml`)**: Automated alert rules (`HighFiveHundredErrorRate`, `CircuitBreakerOpen`, `OutboxDLQBacklog`, `HighLatencyP95`) evaluating operational thresholds every 15 seconds.
+- **🔍 OpenTelemetry & Jaeger Distributed Tracing**: OTLP trace span exporter tracking distributed request propagation across Nginx ➔ FastAPI ➔ PostgreSQL ➔ Redis ➔ ARQ Worker.
+- **☁️ Amazon Managed Prometheus (AMP) & Grafana (AMG) via Terraform**: Reusable HCL module in `terraform/modules/observability/` provisioning `aws_prometheus_workspace`, `aws_grafana_workspace`, and IAM `aps:RemoteWrite` task execution policies.
+- **🧪 46-Test Automated Pytest Telemetry Suite**: 100% passing test coverage including `backend/tests/test_telemetry.py` asserting `/metrics` HTTP 200 exposition, counter increments, and circuit breaker state tracking.
+- **🏗️ Infrastructure as Code (IaC) via Terraform**: 7 production-grade reusable HCL modules in `terraform/modules/` (`vpc`, `rds`, `elasticache`, `alb`, `ecs`, `iam_and_secrets`, `observability`) provisioning AWS cloud resources with zero manual click-ops.
 - **🌐 Dual-AZ VPC Network Topology**: Multi-AZ VPC across `us-east-1a` and `us-east-1b` with Public Subnets (ALB, Fargate Tasks), Private App Subnets, and Private Database Subnets (RDS, ElastiCache Redis).
 - **⚖️ AWS Application Load Balancer (ALB)**: High-availability internet-facing ALB routing traffic dynamically via path rules (`/api/*` ➔ Backend Target Group port 8000, `/*` ➔ Frontend Target Group port 80).
 - **🚢 AWS ECS Fargate Container Orchestration**: Serverless container execution for `backend` (FastAPI), `worker` (ARQ Background Task Processor), and `frontend` (Nginx React SPA) with auto-scaling security groups and CloudWatch logging streams.
@@ -32,7 +38,7 @@ MiniCommerce serves as a benchmark laboratory for exploring **Infrastructure as 
 - **🔒 SHA-256 Payload-Hashed Idempotency Engine**: SHA-256 hash comparison on idempotency key reuse, returning `HTTP 409 Conflict` on request payload mismatches.
 - **🏬 React Store Manager Portal & 401 Interceptor**: Store Manager Dashboard UI (`StoreManagerDashboard.jsx`) for product creation, stock restocking, and soft-deletion, supported by an Axios/Fetch 401 automatic token refresh interceptor in `api.js`.
 - **📊 Datadog-Grade Enterprise Observability Dashboard**: Control panel featuring a System Operational Status Bar, top KPI metrics, live ARQ worker task log streams, and an OpenTelemetry-Style Distributed Waterfall Trace Visualizer.
-- **🐳 Multi-Container Orchestration**: Production-ready `docker-compose.yml` orchestrating `backend` (FastAPI), `redis` (Redis 7 Alpine), `worker` (ARQ Background Worker), and `frontend` (Nginx Alpine multi-stage asset server).
+- **🐳 Multi-Container Orchestration**: Production-ready `docker-compose.yml` orchestrating `backend` (FastAPI), `redis` (Redis 7 Alpine), `worker` (ARQ Background Worker), `frontend` (Nginx Alpine), `prometheus` (Port 9090), `grafana` (Port 3001), and `jaeger` (Port 16686).
 
 ---
 
@@ -113,7 +119,7 @@ MiniCommerce strictly enforces a 5-tier separation of concerns across both local
 | 3. SERVICE LAYER (app/services/)                                                  |
 |    Business rules, domain invariants, transaction control, cache-aside & outbox       |
 |    - AuthService (password verification, dual JWT issuance & scope mappings)      |
-|    - ProductService (cache hit/miss handling & soft-delete cache purging)         |
+|    - ProductService (cache hit/miss metrics & soft-delete cache purging)         |
 |    - OrderService (payload-hashed idempotency, FOR UPDATE locks, Outbox events)   |
 |    - TokenBlacklistService & TraceService (Redis revocation list & traces)        |
 +-----------------------------------------------------------------------------------+
@@ -130,9 +136,12 @@ MiniCommerce strictly enforces a 5-tier separation of concerns across both local
                                      │
                                      ▼
 +-----------------------------------------------------------------------------------+
-| 5. PERSISTENCE, QUEUE & WORKER TIER                                               |
+| 5. PERSISTENCE, QUEUE & OBSERVABILITY TIER                                        |
 |    - Redis 7 Container (Cache Pool, Revocation Blacklist & ARQ Queue on Port 6379)   |
 |    - ARQ Background Worker Container (minicommerce-worker: outbox processor)      |
+|    - Prometheus Container (Port 9090: Scrapes /metrics endpoint & evaluates alerts)  |
+|    - Grafana Container (Port 3001: Golden Signals & DB/Cache SRE Dashboards)      |
+|    - Jaeger Container (Port 16686: OpenTelemetry Distributed Trace Collector)     |
 |    - Supabase PostgreSQL DB (Users, Products, Orders, Outbox on AWS Cloud)         |
 +-----------------------------------------------------------------------------------+
 ```
@@ -184,13 +193,21 @@ MiniCommerce strictly enforces a 5-tier separation of concerns across both local
 │  ├─ GitHub Actions CI Pipeline (Linting, Mypy, Bandit, Trivy, Pytest Services)    │
 │  └─ GitHub Actions CD Pipeline (Multi-Stage Docker builds & GHCR delivery)        │
 │                                                                                   │
-│  [VERSION 7] Infrastructure as Code (IaC) & AWS Cloud Architecture (Current)       │
+│  [VERSION 7] Infrastructure as Code (IaC) & AWS Cloud Architecture                │
 │  ├─ Terraform Modular HCL (6 Packages: VPC, RDS, ElastiCache, ALB, ECS, Secrets)  │
 │  ├─ Dual-AZ VPC Network (Public Subnets, Private App Subnets, Private DB Subnets) │
 │  ├─ AWS ECS Fargate Orchestration (backend, worker, frontend multi-container)     │
 │  ├─ AWS RDS PostgreSQL 15 & ElastiCache Redis Cluster (TLS Transit Encryption)    │
 │  ├─ AWS Secrets Manager (Dynamic Boto3 secret fetcher in app/core/cloud_secrets.py)│
 │  └─ Automated 1-Shot Fargate Seeding (Seeded Admin, Users, Products to RDS)       │
+│                                                                                   │
+│  [VERSION 8] Enterprise Observability & Site Reliability Engineering (Current)     │
+│  ├─ Prometheus Telemetry Engine (/metrics endpoint with custom counters & gauges) │
+│  ├─ Pre-Built Grafana Dashboards (The 4 Golden Signals & DB/Cache SRE Dashboards) │
+│  ├─ SRE Alertmanager Rules (High 5xx, CircuitBreakerOpen, DLQ Backlog, p95 Spike) │
+│  ├─ OpenTelemetry & Jaeger Distributed Tracing (OTLP request span propagation)    │
+│  ├─ Amazon Managed Prometheus (AMP) & Amazon Managed Grafana (AMG) in Terraform   │
+│  └─ Automated Pytest Telemetry Suite (100% Pass Rate: 46/46 Backend Test Suite)  │
 │                                                                                   │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -200,13 +217,17 @@ MiniCommerce strictly enforces a 5-tier separation of concerns across both local
 ## ⚡ Execution Guide: Docker vs. Local Development
 
 ### Option A: Run via Docker Compose (Recommended)
-Launch the full containerized topology (Redis, Backend, ARQ Worker, Frontend):
+Launch the full containerized topology (Redis, Backend, Worker, Frontend, Prometheus, Grafana, Jaeger):
 ```powershell
 docker compose up --build
 ```
 - **React Storefront SPA**: [http://localhost:3000](http://localhost:3000)
 - **Store Manager Portal**: Access via Navbar (Login as `STORE_MANAGER` or `SRE_ADMIN`)
-- **Admin Observability Panel**: [http://localhost:3000](http://localhost:3000) (Click `Admin Panel` in Navbar; Default Credentials: `admin@minicommerce.com` / `Admin@123456`)
+- **Admin Observability Panel**: [http://localhost:3000](http://localhost:3000) (Click `Admin Panel` in Navbar; Credentials: `admin@minicommerce.com` / `Admin@123456`)
+- **Prometheus Metrics Exporter**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
+- **Prometheus Web UI**: [http://localhost:9090](http://localhost:9090)
+- **Grafana SRE Dashboards**: [http://localhost:3001](http://localhost:3001) (Credentials: `admin` / `admin`)
+- **Jaeger Distributed Tracing UI**: [http://localhost:16686](http://localhost:16686)
 - **FastAPI Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **Liveness Probe (`/healthz/liveness`)**: [http://localhost:8000/healthz/liveness](http://localhost:8000/healthz/liveness)
 - **Readiness Probe (`/healthz/readiness`)**: [http://localhost:8000/healthz/readiness](http://localhost:8000/healthz/readiness)
@@ -218,7 +239,6 @@ docker compose up --build
 #### 1. Launch Backend Server (Terminal 1)
 ```powershell
 cd backend
-python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --port 8000
@@ -241,16 +261,23 @@ npm run dev
 
 ---
 
-### Option C: Run Automated Test & Benchmark Suites
+### Option C: Run Automated Test & Quality Check Suites
 
 ```powershell
 cd backend
 .\.venv\Scripts\Activate.ps1
 
-# 1. Run full 40-test integration, security, resilience, outbox & data engineering suite
+# 1. Run full 46-test telemetry, security, resilience, outbox & data engineering suite
 python -m pytest -v
 
-# 2. Re-run performance laboratory benchmarks
+# 2. Run telemetry-specific test suite
+python -m pytest backend/tests/test_telemetry.py -v
+
+# 3. Run static code linting & mypy type checking
+ruff check backend/app
+mypy backend/app
+
+# 4. Re-run performance laboratory benchmarks
 python app/db/run_benchmarks.py
 ```
 
@@ -265,6 +292,8 @@ Detailed architectural specifications and experiment logs:
 - **[v/v5.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v5.txt)**: Version 5 Master Specification & Work Log
 - **[v/v6.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v6.txt)**: Version 6 Master Specification & Work Log
 - **[v/v7.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v7.txt)**: Version 7 Master Specification & Work Log
+- **[v/v8.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/v/v8.txt)**: Version 8 Master Specification & Work Log
+- **[docs/v8/observability-and-sre.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v8/observability-and-sre.md)**: Observability Engine, Prometheus, Grafana & SRE Runbook
 - **[docs/v7/aws-cloud-architecture.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v7/aws-cloud-architecture.md)**: Infrastructure as Code & AWS Cloud Architecture Specification
 - **[docs/v7/v7_postmortem_and_troubleshooting.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v7/v7_postmortem_and_troubleshooting.md)**: AWS Deployment Post-Mortem, Log Evidence & Troubleshooting Guide
 - **[docs/v7/terraform_run.txt](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v7/terraform_run.txt)**: Live Terraform Execution & Provisioning Outputs
@@ -274,4 +303,3 @@ Detailed architectural specifications and experiment logs:
 - **[docs/v5/frontend-architecture.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/frontend-architecture.md)**: Store Manager Portal & 401 Interceptor Architecture
 - **[docs/v5/troubleshooting.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v5/troubleshooting.md)**: Comprehensive V5 Error Log & Resolution Tracker
 - **[docs/v6/devops-and-cicd.md](file:///d:/shivang/Project/MLProjects/MiniCommerce/docs/v6/devops-and-cicd.md)**: DevOps Automation, Pre-Commit Hooks & CI/CD Pipeline Architecture
-

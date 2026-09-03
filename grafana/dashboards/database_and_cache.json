@@ -1,0 +1,70 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Redis Cache Hit Rate % Gauge",
+      "type": "gauge",
+      "targets": [
+        {
+          "expr": "((sum(rate(minicommerce_redis_cache_hits_total[5m])) or 0) / ((sum(rate(minicommerce_redis_cache_hits_total[5m])) or 0) + (sum(rate(minicommerce_redis_cache_misses_total[5m])) or 1))) * 100",
+          "legendFormat": "Hit Rate %"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "title": "Circuit Breaker State (0=CLOSED, 1=HALF-OPEN, 2=OPEN)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minicommerce_circuit_breaker_state",
+          "legendFormat": "{{name}} State"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "title": "Outbox Pending & Dead-Letter Queue (DLQ)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minicommerce_outbox_events_pending_total",
+          "legendFormat": "Pending Outbox Events"
+        },
+        {
+          "expr": "minicommerce_outbox_events_dlq_total",
+          "legendFormat": "DLQ Dead-Letter Events"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "title": "ARQ Worker Tasks Completed",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(minicommerce_arq_tasks_completed_total[1m])) by (task_name)",
+          "legendFormat": "{{task_name}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["sre", "database", "cache", "minicommerce"],
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "MiniCommerce SRE - Database, Cache & Workers",
+  "uid": "minicommerce-database-and-cache"
+}
