@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal
 
-from app.api.deps import get_db, require_scope
+from app.api.deps import get_db, get_read_db, require_scope
 from app.core.security import decode_access_token
 from app.models.user import ROLE_SCOPES
 from app.repositories.product_repository import ProductRepository
@@ -26,7 +26,7 @@ async def list_products(
     sort_order: str = Query("asc", description="Sort direction: asc or desc"),
     search: str | None = Query(None, description="Search term for name or description"),
     category: str | None = Query(None, description="Category filter term"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     products, total_count = await ProductService.list_products(
         db,
@@ -48,14 +48,14 @@ async def list_products(
 async def list_products_keyset(
     last_seen_id: uuid.UUID | None = Query(None, description="Cursor last seen product ID"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """Keyset (cursor-based) pagination endpoint avoiding deep OFFSET performance degradation."""
     return await ProductRepository.get_products_keyset(db, last_seen_id=last_seen_id, limit=limit)
 
 
 @router.get("/{id}", response_model=ProductResponse)
-async def get_product(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_product(id: uuid.UUID, db: AsyncSession = Depends(get_read_db)):
     return await ProductService.get_product(db, id)
 
 

@@ -7,6 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./minicommerce.db"
+    READ_DATABASE_URL: str | None = None
     JWT_SECRET: str = "supersecretkey_minicommerce_v1_laboratory_key_2026"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15

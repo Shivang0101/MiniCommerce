@@ -3,7 +3,7 @@ import logging
 import time
 from typing import Any
 
-from app.api.deps import get_current_admin_user, get_db
+from app.api.deps import get_current_admin_user, get_db, get_read_db
 from app.core.redis import get_redis
 from app.core.security import hash_password
 from app.models.order import Order
@@ -21,7 +21,7 @@ admin_router = APIRouter(prefix="/admin", tags=["Admin Observability"])
 
 @admin_router.get("/metrics")
 async def get_admin_metrics(
-    db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_read_db), admin: User = Depends(get_current_admin_user)
 ) -> dict[str, Any]:
     redis = get_redis()
     now = time.time()
@@ -153,7 +153,7 @@ async def create_admin_user(
 
 @admin_router.get("/analytics/revenue")
 async def get_revenue_analytics(
-    db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_read_db), admin: User = Depends(get_current_admin_user)
 ) -> list[dict[str, Any]]:
     """
     Executes a SQL CTE (Common Table Expression) combined with Window Functions
@@ -166,7 +166,7 @@ async def get_revenue_analytics(
 
 @admin_router.get("/outbox/dead-letter")
 async def get_dead_letter_outbox_events(
-    db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_read_db), admin: User = Depends(get_current_admin_user)
 ) -> list[dict[str, Any]]:
     """Lists outbox events that failed max retries and transitioned to DEAD_LETTER state."""
     from app.repositories.outbox_repository import OutboxRepository

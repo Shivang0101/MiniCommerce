@@ -1,8 +1,7 @@
 import uuid
-from collections.abc import AsyncGenerator
 
 from app.core.security import decode_access_token
-from app.db.session import AsyncSessionLocal
+from app.db.session import get_db, get_read_db, get_write_db
 from app.models.user import ROLE_SCOPES, User
 from app.services.auth_service import AuthService
 from app.services.token_blacklist import TokenBlacklistService
@@ -10,16 +9,10 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+__all__ = ["get_db", "get_read_db", "get_write_db", "get_current_user", "get_current_admin_user", "require_scope"]
+
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
-
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db), token: str = Depends(oauth2_scheme)

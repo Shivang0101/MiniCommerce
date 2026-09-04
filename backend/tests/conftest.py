@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from app.api.deps import get_db
+from app.api.deps import get_db, get_read_db, get_write_db
 from app.db.base import Base
 from app.main import app
 from httpx import ASGITransport, AsyncClient
@@ -44,7 +44,10 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
             yield session
 
     app.dependency_overrides[get_db] = _get_test_db
+    app.dependency_overrides[get_read_db] = _get_test_db
+    app.dependency_overrides[get_write_db] = _get_test_db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+

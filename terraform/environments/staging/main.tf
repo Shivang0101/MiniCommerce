@@ -106,3 +106,11 @@ module "observability" {
   workspace_alias = "minicommerce-${var.environment}-prometheus"
   grafana_name    = "minicommerce-${var.environment}-grafana"
 }
+
+# 8. AWS WAF (Web Application Firewall) & Security Hardening Module
+module "waf" {
+  source      = "../../modules/waf"
+  environment = var.environment
+  alb_arn     = module.alb.alb_arn
+}
+

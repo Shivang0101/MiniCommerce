@@ -32,3 +32,9 @@ output "amg_workspace_endpoint" {
   description = "Dashboard URL of Amazon Managed Grafana (AMG) workspace"
   value       = module.observability.amg_workspace_endpoint
 }
+
+output "waf_web_acl_arn" {
+  description = "ARN of the AWS WAF Web ACL protecting ALB"
+  value       = module.waf.web_acl_arn
+}
+

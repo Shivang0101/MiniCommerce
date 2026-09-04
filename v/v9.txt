@@ -1,0 +1,176 @@
+================================================================================
+MINICOMMERCE V9 LABORATORY - MASTER VERSION 9 SPECIFICATION & WORK LOG
+================================================================================
+
+[SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS]
+--------------------------------------------------------------------------------
+Version 9 completes the MiniCommerce laboratory by introducing PostgreSQL 
+Read-Replica connection splitting, a Locust high-concurrency load testing 
+suite, AWS WAF (Web Application Firewall) IaC module, and a Chaos Engineering 
+Disaster Recovery runbook with RTO < 30s and RPO = 0s.
+
+ASCII High Availability & Disaster Recovery Topology:
+
++-------------------------------------------------------------------------------+
+|                      MINICOMMERCE V9 HIGH AVAILABILITY TOPOLOGY              |
++-------------------------------------------------------------------------------+
+
+[TRAFFIC INGRESS & AWS SECURITY]
+                                  
+      +------------------------+      Attach Web ACL     +-----------------------+
+      | AWS WAF v2 Web ACL     | ---------------------> | Application Load      |
+      | (SQLi, XSS, RateLimit) |                        | Balancer (ALB)        |
+      +------------------------+                        +-----------------------+
+                                                                    │
+                                                                    ▼
+[APPLICATION & READ/WRITE CONNECTION SPLITTING]
+                                                        +-----------------------+
+                                                        | AWS ECS Fargate Task  |
+                                                        | (FastAPI Backend)     |
+                                                        +-----------------------+
+                                                        /                       \
+                                         get_write_db() /                         \ get_read_db()
+                                                       ▼                           ▼
+                                      +--------------------+      +--------------------+
+                                      | AWS RDS Primary    | ───> | AWS RDS Read       |
+                                      | (PostgreSQL 15)    | Sync | Replica / Aurora   |
+                                      +--------------------+      +--------------------+
+
+================================================================================
+[SECTION 2: NEW TECHNOLOGIES & CORE CODE SNIPPETS]
+================================================================================
+
+1. Dual Engine Database Connection Splitting (`backend/app/db/session.py`):
+```python
+primary_engine = _create_engine(settings.DATABASE_URL)
+replica_engine = _create_engine(settings.READ_DATABASE_URL) if settings.READ_DATABASE_URL else primary_engine
+
+async def get_write_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionPrimary() as session:
+        yield session
+
+async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionReplica() as session:
+        try:
+            yield session
+        except Exception:
+            async with AsyncSessionPrimary() as fallback_session:
+                yield fallback_session
+```
+
+2. Locust High-Concurrency Load Suite (`backend/tests/load/locustfile.py`):
+```python
+class MiniCommerceUser(HttpUser):
+    wait_time = between(0.1, 1.5)
+    def on_start(self):
+        self.user_id = str(uuid.uuid4())
+        self.token = create_access_token(subject=self.user_id)
+        self.headers = {"Authorization": f"Bearer {self.token}"}
+```
+
+3. AWS WAF Regional Module (`terraform/modules/waf/main.tf`):
+```hcl
+resource "aws_wafv2_web_acl" "main" {
+  name  = "minicommerce-${var.environment}-waf"
+  scope = "REGIONAL"
+  rule {
+    name     = "RateLimitRule"
+    priority = 10
+    statement { rate_based_statement { limit = 1000 } }
+  }
+}
+```
+
+================================================================================
+[SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS]
+================================================================================
+
+1. Database Read Replica Routing:
+   - `GET /api/v1/products`, `GET /api/v1/products/keyset`, `GET /api/v1/products/{id}`: Route to `get_read_db`.
+   - `GET /api/v1/admin/metrics`, `GET /api/v1/admin/analytics/revenue`: Route to `get_read_db`.
+   - Mutations (`POST`, `PUT`, `DELETE`, `SELECT FOR UPDATE`): Route to `get_write_db`.
+
+2. Automated Pytest Test Suite (`backend/tests/test_db_replica.py`):
+   - Asserts `get_write_db`, `get_read_db`, and fallback routing logic.
+
+3. Chaos Resilience Script (`backend/tests/load/run_chaos_test.py`):
+   - Verifies 0% HTTP 500 error impact under concurrent load and Redis cache flushes.
+
+================================================================================
+[SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES]
+================================================================================
+
+1. Terraform AWS WAF Module (`terraform/modules/waf/`):
+   - Added `main.tf`, `variables.tf`, `outputs.tf` defining `aws_wafv2_web_acl` and `aws_wafv2_web_acl_association`.
+   - Instantiated module in `terraform/environments/staging/main.tf` and exported `waf_web_acl_arn`.
+
+2. Operational Disaster Recovery Runbook (`docs/v9/chaos-and-dr.md`):
+   - Documented RTO (< 30s) and RPO (= 0s guaranteed by Transactional Outbox pattern).
+
+================================================================================
+[SECTION 5: STEP-BY-STEP WORK LOG & COMMANDS EXECUTED]
+================================================================================
+
+Step 1: Added `READ_DATABASE_URL` setting to `backend/app/core/config.py`.
+Step 2: Refactored `backend/app/db/session.py` to create `primary_engine` and `replica_engine` with `get_write_db()` and `get_read_db()` session generators.
+Step 3: Exported `get_read_db` and `get_write_db` in `backend/app/api/deps.py`.
+Step 4: Updated `backend/app/api/v1/products.py` and `backend/app/api/v1/admin.py` endpoints to use `get_read_db` for read-only operations.
+Step 5: Implemented `backend/tests/test_db_replica.py` pytest suite and verified execution: 3/3 tests passed in 0.29s.
+Step 6: Added `locust>=2.24.0` to `backend/requirements.txt`.
+Step 7: Implemented `backend/tests/load/locustfile.py` load test suite simulating unique authenticated virtual users.
+Step 8: Implemented `backend/tests/load/run_chaos_test.py` resilience test script.
+Step 9: Built Terraform IaC module `terraform/modules/waf/` (`main.tf`, `variables.tf`, `outputs.tf`) and instantiated in `terraform/environments/staging/main.tf` & `outputs.tf`.
+Step 10: Executed Terraform initialization and validation:
+        Command: `terraform -chdir=terraform/environments/staging init`
+        Result: `Terraform has been successfully initialized!`
+        Command: `terraform -chdir=terraform/environments/staging validate`
+        Result: `Success! The configuration is valid.`
+Step 11: Created `docs/v9/chaos-and-dr.md` operational disaster recovery runbook and `docs/v9/local-testing-and-replication.md`.
+Step 12: Created `v/v9.txt` and updated `v/summary.txt` and `README.md`.
+
+================================================================================
+[SECTION 6: LOCAL DOCKER REPLICATION GUIDE & VERIFICATION BENCHMARKS]
+================================================================================
+
+1. Start Container Stack:
+   Command: `docker compose up --build`
+   Endpoints: Backend `http://localhost:8000`, Frontend `http://localhost:3000`, Grafana `http://localhost:3001`.
+
+2. Test Read-Replica API Connection Splitting:
+   Command: `curl http://localhost:8000/api/v1/products/keyset?limit=10`
+   Result: `StatusCode: 200 OK`, returns catalog items with automatic primary DB fallback.
+
+3. Run Automated Pytest Suite:
+   Command: `backend\.venv\Scripts\python.exe -m pytest -v`
+   Result: `49 passed in 28.74s` (100% pass rate across all 49 backend unit & integration tests).
+
+4. Run Chaos Engineering Stress Script:
+   Command: `backend\.venv\Scripts\python.exe backend/tests/load/run_chaos_test.py`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   Total Workflows Executed: 150
+   Successful Workflows:    150
+   Failed Workflows (500s): 0
+   Total Execution Time:    14.01 seconds
+   Average Throughput:      10.71 RPS
+   p50 Median Latency:      804.04 ms
+   p95 Latency:             1137.77 ms
+   Status Code Summary:     {200: 150}
+   [PASSED] CHAOS EXPERIMENT COMPLETE! 0% HTTP 500 Failures under load.
+
+5. Run Locust Concurrency Load Test Suite (Headless CLI):
+   Command: `backend\.venv\Scripts\python.exe -m locust -f backend/tests/load/locustfile.py --headless -u 50 -r 10 --run-time 30s --host http://localhost:8000`
+   Verification Log:
+   --------------------------------------------------------------------------------
+   Total Requests Executed: 1,018 requests in 30s (~35-40 RPS)
+   GET /api/v1/products:         308 reqs, 0 fails (0% error rate), avg 130ms, p50 54ms
+   GET /api/v1/products/keyset:  394 reqs, 0 fails (0% error rate), avg 654ms, p50 600ms
+
+6. Run Locust Interactive Web UI Mode:
+   Command: `backend\.venv\Scripts\python.exe -m locust -f backend/tests/load/locustfile.py --host http://localhost:8000`
+   Access: Open `http://localhost:8089` in browser.
+
+================================================================================
+END OF SPECIFICATION & WORK LOG
+================================================================================
+
