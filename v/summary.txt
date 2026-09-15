@@ -58,11 +58,14 @@ MINICOMMERCE LABORATORY - MASTER SUMMARY (VERSION 1 TO VERSION 9)
 - Amazon Managed Prometheus (AMP) & Amazon Managed Grafana (AMG) Terraform module.
 - Automated 46-Test Pytest Telemetry Suite (100% pass rate).
 
-[VERSION 9: CLOUD-NATIVE HIGH AVAILABILITY, DISASTER RECOVERY & CHAOS ENGINEERING]
-- Database Read-Replica Connection Splitting Engine (`primary_engine` & `replica_engine` with `get_write_db()` & `get_read_db()`).
-- Locust High-Concurrency Load & Resilience Stress Testing Suite (`locustfile.py` simulating unique virtual users).
-- AWS WAF (Web Application Firewall) IaC Module (`terraform/modules/waf/` protecting ALB from SQLi, XSS, rate-limit abuse).
-- Disaster Recovery & Chaos Engineering Operational Runbook (`docs/v9/chaos-and-dr.md` with RTO < 30s and RPO = 0s).
+[VERSION 10: PRODUCTION READINESS FINISHING & GAP RESOLUTION]
+- Version String Harmonization (unified app title, lifespan log, and root endpoint metadata to V10.0.0).
+- Alembic Database Migration Strategy (replaced inline raw DDL in lifespan with versioned `v10_final_schema_and_indexes` migration).
+- Database Indexing & Atomic Stock Mutation (composite indexes `ix_orders_user_id_status` & `ix_products_is_deleted_id` + single atomic SQL UPDATE stock mutation).
+- Security & CORS Hardening (sanitized live credentials from `.env`, strict `CORS_ORIGINS` config, 10MB payload size limit middleware `ContentSizeLimitMiddleware`).
+- Multi-Stage Docker & Non-Root Container Security (converted backend Dockerfile to multi-stage build running under dedicated `appuser`).
+- CI/CD PostgreSQL Integration (updated `.github/workflows/ci.yml` to run Pytest against PostgreSQL 15 container with 75% coverage enforcement).
+- Locust Virtual User Lifecycle (authenticated user creation on load test start).
 
 ================================================================================
 END OF MASTER SUMMARY

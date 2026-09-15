@@ -74,7 +74,11 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
             if request_count > limit:
                 logger.warning(
-                    f"Rate limit exceeded for client '{client_id}' on path '{path}' ({request_count}/{limit})"
+                    "Rate limit exceeded for client '%s' on path '%s' (%s/%s)",
+                    client_id,
+                    path,
+                    request_count,
+                    limit,
                 )
                 retry_after = 14  # estimated window cooldown
                 return JSONResponse(
@@ -99,5 +103,5 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             return response
 
         except Exception as e:
-            logger.warning(f"Rate limiter check failed: {e}. Falling back to normal flow.")
+            logger.warning("Rate limiter check failed: %s. Falling back to normal flow.", e)
             return await call_next(request)

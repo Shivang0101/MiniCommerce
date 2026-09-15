@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from app.models.base import Base
 from sqlalchemy import (
+    Index,
     UUID,
     Boolean,
     CheckConstraint,
@@ -23,6 +24,7 @@ class Product(Base):
     __table_args__ = (
         CheckConstraint("price >= 0", name="check_product_price_non_negative"),
         CheckConstraint("stock >= 0", name="check_product_stock_non_negative"),
+        Index("ix_products_is_deleted_id", "is_deleted", "id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

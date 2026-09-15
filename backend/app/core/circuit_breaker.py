@@ -45,13 +45,14 @@ class CircuitBreaker:
     async def can_execute(self) -> bool:
         async with self._lock:
             now = time.time()
+            self._clean_window(now)
             if self.state == CircuitState.OPEN:
                 if now - self.last_state_change >= self.recovery_time_seconds:
                     self.state = CircuitState.HALF_OPEN
                     self.last_state_change = now
                     self._update_telemetry()
                     logger.info(
-                        f"Circuit Breaker '{self.name}' transitioning from OPEN -> HALF_OPEN"
+                        "Circuit Breaker '%s' transitioning from OPEN -> HALF_OPEN", self.name
                     )
                     return True
                 return False

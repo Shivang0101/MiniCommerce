@@ -8,10 +8,20 @@ from app.db.base import Base
 from app.main import app
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+import os
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_temp.db"
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    os.getenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:"),
+)
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, future=True)
+connect_args = {}
+if "asyncpg" in TEST_DATABASE_URL:
+    connect_args = {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+
+test_engine = create_async_engine(
+    TEST_DATABASE_URL, echo=False, future=True, connect_args=connect_args
+)
 
 TestSessionLocal = async_sessionmaker(
     bind=test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False

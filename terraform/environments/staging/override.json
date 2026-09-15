@@ -1,0 +1,1 @@
+{"containerOverrides":[{"name":"backend","command":["python","app/db/seed.py"]}]}

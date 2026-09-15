@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.models.base import Base
-from sqlalchemy import UUID, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Index, UUID, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
@@ -17,6 +17,7 @@ class Order(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "idempotency_key", name="uq_user_idempotency_key"),
+        Index("ix_orders_user_id_status", "user_id", "status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

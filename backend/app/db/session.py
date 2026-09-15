@@ -30,12 +30,17 @@ def _create_engine(url: str) -> AsyncEngine:
     engine_kwargs = {"echo": False, "future": True, "connect_args": connect_args}
     if "sqlite" not in formatted_url:
         engine_kwargs.update(
-            {"pool_size": 15, "max_overflow": 10, "pool_recycle": 1800, "pool_pre_ping": True}
+            {
+                "pool_size": settings.DB_POOL_SIZE,
+                "max_overflow": settings.DB_MAX_OVERFLOW,
+                "pool_recycle": settings.DB_POOL_RECYCLE,
+                "pool_pre_ping": True,
+            }
         )
     return create_async_engine(formatted_url, **engine_kwargs)
 
 
-# Primary (Master) Database Engine
+# Primary (Master) Database Engine 
 primary_url = settings.DATABASE_URL
 primary_engine = _create_engine(primary_url)
 AsyncSessionPrimary = async_sessionmaker(
@@ -90,7 +95,7 @@ async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
         session = AsyncSessionReplica()
     except Exception as exc:
         logger.warning(
-            f"Read replica session creation failed ({exc}). Falling back to primary database."
+            "Read replica session creation failed (%s). Falling back to primary database.", exc
         )
         async with AsyncSessionPrimary() as fallback_session:
             try:

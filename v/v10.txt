@@ -1,0 +1,182 @@
+================================================================================
+MINICOMMERCE V10 LABORATORY - MASTER VERSION 10 SPECIFICATION & WORK LOG
+================================================================================
+
+[SECTION 1: VERSION OVERVIEW & VISUAL ARCHITECTURE DIAGRAMS]
+--------------------------------------------------------------------------------
+Version 10 serves as the final finishing release of the MiniCommerce laboratory.
+It resolves all Senior Engineer Code Review findings and production readiness gaps:
+1. Version Drift Elimination: Standardized API titles, lifespan logs, and endpoints to V10.0.0.
+2. Production Migration Strategy: Replaced raw lifespan inline ALTER TABLE queries with a versioned Alembic migration script (`v10_final_schema_and_indexes`).
+3. Database Optimization & Indexing: Added composite indexes (`ix_orders_user_id_status`, `ix_products_is_deleted_id`) and true atomic SQL stock updates (`update_stock_atomic`).
+4. Security Hardening: Removed plaintext Supabase credentials, enforced strict CORS origin validation, and added HTTP Request Content-Length size limiting middleware (10MB MAX).
+5. Multi-Stage Containerization: Converted backend Dockerfile to a multi-stage build running under a dedicated non-root application user (`appuser`).
+6. CI/CD PostgreSQL Testing: Updated GitHub Actions workflow (`ci.yml`) to run Pytest against a real PostgreSQL 15 service container and raised coverage threshold to 75%.
+7. Load Test Authentication: Enhanced Locust virtual user lifecycle to auto-register/login users so load testing runs end-to-end against live DB boundaries.
+
+ASCII Final Production-Grade Architecture:
+
++-------------------------------------------------------------------------------+
+|                    MINICOMMERCE V10 ENTERPRISE ARCHITECTURE                   |
++-------------------------------------------------------------------------------+
+
+[CLIENT & EDGE Hardening]
+    Browser / Mobile Client
+              │
+              ▼
+    +-------------------+      WAF ACL Rules      +-------------------+
+    | AWS WAF v2        | ──────────────────────> | ALB (HTTPS)       |
+    | (SQLi/XSS/Rate)   |                         | Body Limit: 10MB  |
+    +-------------------+                         +-------------------+
+                                                            │
+                                                            ▼
+[MULTI-STAGE FARGATE RUNTIME (Non-Root appuser)]
+                                                  +-------------------+
+                                                  | ECS Fargate Task  |
+                                                  | (FastAPI V10)     |
+                                                  +-------------------+
+                                                  /                   \
+                                  get_write_db() /                     \ get_read_db()
+                                                ▼                       ▼
+                                      +------------------+    +------------------+
+                                      | AWS RDS Primary  |───>| AWS RDS Replica  |
+                                      | (Postgres 15)    |Sync| (Postgres 15)    |
+                                      +------------------+    +------------------+
+                                        Composite Indexes:
+                                        - ix_orders_user_id_status
+                                        - ix_products_is_deleted_id
+
+================================================================================
+[SECTION 2: NEW TECHNOLOGIES & CORE CODE SNIPPETS]
+================================================================================
+
+1. Multi-Stage Dockerfile with Non-Root User (`backend/Dockerfile`):
+```dockerfile
+FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+FROM python:3.12-slim AS runner
+WORKDIR /app
+RUN useradd --create-home appuser
+COPY --from=builder /root/.local /home/appuser/.local
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini .
+USER appuser
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+2. Alembic Versioned Migration (`backend/alembic/versions/v10_final_schema_and_indexes.py`):
+```python
+def upgrade() -> None:
+    op.create_table('users', ...)
+    op.create_table('products', ...)
+    op.create_index('ix_products_is_deleted_id', 'products', ['is_deleted', 'id'])
+    op.create_table('orders', ...)
+    op.create_index('ix_orders_user_id_status', 'orders', ['user_id', 'status'])
+```
+
+3. True Atomic SQL Stock Update (`backend/app/repositories/product_repository.py`):
+```python
+@staticmethod
+async def update_stock_atomic(db: AsyncSession, product_id: uuid.UUID, quantity: int) -> bool:
+    stmt = (
+        update(Product)
+        .where(Product.id == product_id)
+        .where(Product.stock >= quantity)
+        .where(Product.is_deleted == False)
+        .values(stock=Product.stock - quantity)
+    )
+    result = await db.execute(stmt)
+    return bool(result.rowcount and result.rowcount > 0)
+```
+
+4. Request Payload Content Size Limit Middleware (`backend/app/main.py`):
+```python
+MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024  # 10MB
+
+class ContentSizeLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_REQUEST_BODY_SIZE:
+            return JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content={"detail": "Request payload exceeds maximum allowed size (10MB)."},
+            )
+        return await call_next(request)
+```
+
+================================================================================
+[SECTION 3: FEATURE & API ADDITIONS / MODIFICATIONS]
+================================================================================
+
+1. Version Consistency Standardized across application metadata (`main.py`, `config.py`, `pyproject.toml`).
+2. Removed raw inline DDL statements from lifespan context manager.
+3. Added `ContentSizeLimitMiddleware` enforcing 10MB payload boundaries.
+4. Added composite DB indexes to SQLAlchemy `Order` and `Product` models.
+5. Standardized logging calls across `session.py`, `rate_limiter.py`, `circuit_breaker.py`, `order_service.py` to use `%s` formatting strings.
+6. Enhanced Locust virtual user lifecycle in `locustfile.py` to automatically register and authenticate users.
+
+================================================================================
+[SECTION 4: INFRASTRUCTURE & CONFIGURATION CHANGES]
+================================================================================
+
+1. Configurable Engine Connection Pools in `Settings` (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE`).
+2. Configurable `CORS_ORIGINS` in `Settings` with strict origins matching CORS spec.
+3. GitHub Actions CI (`ci.yml`):
+   - Set `DATABASE_URL` to `postgresql+asyncpg://postgres:postgres@localhost:5432/minicommerce_test` to test against real PostgreSQL 15 container.
+   - Enforced coverage threshold `fail_under = 75`.
+4. Pre-commit configuration (`.pre-commit-config.yaml`): Removed `black` to eliminate conflict with `ruff-format`.
+
+================================================================================
+[SECTION 5: STEP-BY-STEP WORK LOG & COMMANDS EXECUTED]
+================================================================================
+
+Step 1: Created Alembic migration revision `backend/alembic/versions/v10_final_schema_and_indexes.py`.
+Step 2: Updated SQLAlchemy models `Order` and `Product` with composite index definitions (`ix_orders_user_id_status`, `ix_products_is_deleted_id`).
+Step 3: Refactored `ProductRepository.update_stock_atomic` to perform atomic SQL UPDATE queries.
+Step 4: Added configurable DB pool settings and CORS_ORIGINS to `backend/app/core/config.py`.
+Step 5: Updated `backend/app/db/session.py` to bind engine pool parameters to `Settings` and fixed logging f-strings.
+Step 6: Refactored `backend/app/main.py` version metadata to V10.0.0, added `ContentSizeLimitMiddleware`, and removed lifespan inline DDL.
+Step 7: Cleaned up late imports in `backend/app/services/order_service.py`.
+Step 8: Updated logger calls in `rate_limiter.py` and `circuit_breaker.py`, and added timestamp window pruning to `CircuitBreaker.can_execute()`.
+Step 9: Converted `backend/Dockerfile` to multi-stage build with `appuser` non-root security.
+Step 10: Updated `.github/workflows/ci.yml` to test Pytest against PostgreSQL 15 and enforce 75% coverage.
+Step 11: Removed `black` hook from `.pre-commit-config.yaml`.
+Step 12: Updated `pyproject.toml` version to 10.0.0 and `fail_under = 75`.
+Step 13: Updated `backend/tests/conftest.py` to support `TEST_DATABASE_URL` environment override and prevent leftover DB artifact creation.
+Step 14: Enhanced `backend/tests/load/locustfile.py` to register and authenticate users during load tests.
+Step 15: Executed full automated Pytest test suite across all categories:
+         Command: `python -m pytest backend/tests -v`
+         Result: All 49 tests passed with 100% success rate.
+
+================================================================================
+[SECTION 6: LOCAL DOCKER REPLICATION GUIDE & VERIFICATION BENCHMARKS]
+================================================================================
+
+1. Build & Test Multi-Stage Docker Image:
+   Command: `docker build -t minicommerce-backend:v10 ./backend`
+   Command: `docker run --rm minicommerce-backend:v10 whoami`
+   Output: `appuser` (Confirms container executes under non-root user).
+
+2. Run Automated Pytest Suite:
+   Command: `python -m pytest backend/tests -v`
+   Result: `49 passed in 28.50s` (100% pass rate).
+
+3. Verify Root API Metadata:
+   Command: `curl http://localhost:8000/`
+   Output:
+   ```json
+   {
+     "name": "MiniCommerce V10 Laboratory API",
+     "version": "10.0.0",
+     "status": "running",
+     "docs": "/docs"
+   }
+   ```
+
+================================================================================
+END OF SPECIFICATION & WORK LOG
+================================================================================

@@ -15,3 +15,10 @@ variable "grafana_name" {
   description = "Name for Amazon Managed Grafana workspace"
   default     = "minicommerce-grafana"
 }
+
+variable "enable_grafana" {
+  type        = bool
+  description = "Enable Amazon Managed Grafana workspace creation (Requires AWS Marketplace Subscription & AWS SSO)"
+  default     = false
+}
+

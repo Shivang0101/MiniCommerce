@@ -20,9 +20,33 @@ class MiniCommerceUser(HttpUser):
     wait_time = between(0.1, 1.5)
 
     def on_start(self):
-        """Generates a unique virtual user identity and JWT access token on session start."""
-        self.user_id = str(uuid.uuid4())
-        self.token = create_access_token(subject=self.user_id)
+        """Registers/authenticates a virtual user and acquires a valid JWT access token on session start."""
+        unique_id = str(uuid.uuid4())[:8]
+        email = f"loadtest_user_{unique_id}@example.com"
+        password = "Password123!"
+
+        # Register user
+        reg_resp = self.client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": password, "full_name": f"LoadUser {unique_id}"},
+            name="/api/v1/auth/register",
+        )
+
+        if reg_resp.status_code in (200, 201):
+            data = reg_resp.json()
+            self.token = data.get("access_token")
+        else:
+            # Fallback to login
+            login_resp = self.client.post(
+                "/api/v1/auth/login",
+                data={"username": email, "password": password},
+                name="/api/v1/auth/login",
+            )
+            if login_resp.status_code == 200:
+                self.token = login_resp.json().get("access_token")
+            else:
+                self.token = create_access_token(subject=str(uuid.uuid4()))
+
         self.headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",

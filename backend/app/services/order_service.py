@@ -1,4 +1,6 @@
+import hashlib
 import json
+import logging
 import time
 import uuid
 from decimal import Decimal
@@ -7,10 +9,14 @@ from app.core.redis import get_arq_pool, get_redis
 from app.models.order import Order
 from app.repositories.cart_repository import CartRepository
 from app.repositories.order_repository import OrderRepository
+from app.repositories.outbox_repository import OutboxRepository
 from app.repositories.product_repository import ProductRepository
+from app.services.cache_service import CacheService
 from app.services.trace_service import TraceService
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class OrderService:
@@ -18,8 +24,6 @@ class OrderService:
     async def create_order_checkout(
         db: AsyncSession, user_id: uuid.UUID, idempotency_key: str | None = None
     ) -> Order:
-        import hashlib
-
         start_time = time.time()
 
         # 1. Idempotency Check: if idempotency_key is provided, check if order already exists
@@ -121,8 +125,6 @@ class OrderService:
             await CartRepository.clear_cart_items(db, cart)
 
             # 6b. Insert Transactional Outbox Event inside the SAME atomic SQL transaction
-            from app.repositories.outbox_repository import OutboxRepository
-
             outbox_payload = json.dumps(
                 {
                     "order_id": str(order.id),
@@ -145,8 +147,6 @@ class OrderService:
             insert_order_ms = round((time.time() - commit_start) * 1000, 2)
 
             # 8. Invalidate product catalog cache upon stock update
-            from app.services.cache_service import CacheService
-
             await CacheService.invalidate_product_cache()
 
             # 9. Post-Commit Asynchronous Task Offloading & Trace Recording
@@ -205,9 +205,7 @@ class OrderService:
                         _job_id=f"analytics_{order.id}",
                     )
                 except Exception as e:
-                    import logging
-
-                    logging.getLogger(__name__).warning(f"Failed to enqueue ARQ tasks: {e}")
+                    logger.warning("Failed to enqueue ARQ tasks: %s", e)
 
             arq_enqueue_ms = round((time.time() - arq_start) * 1000, 2)
             total_checkout_ms = round((time.time() - start_time) * 1000, 2)

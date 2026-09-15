@@ -35,13 +35,14 @@ resource "aws_iam_policy" "amp_ingest" {
   })
 }
 
-# 3. Amazon Managed Grafana (AMG) Workspace
+# 3. Amazon Managed Grafana (AMG) Workspace (Optional)
 resource "aws_grafana_workspace" "main" {
+  count                    = var.enable_grafana ? 1 : 0
   name                     = var.grafana_name
   account_access_type      = "CURRENT_ACCOUNT"
   authentication_providers = ["AWS_SSO"]
   permission_type          = "SERVICE_MANAGED"
-  role_arn                 = aws_iam_role.grafana.arn
+  role_arn                 = aws_iam_role.grafana[0].arn
   data_sources             = ["PROMETHEUS"]
 
   tags = {
@@ -53,7 +54,8 @@ resource "aws_grafana_workspace" "main" {
 
 # IAM Role for Managed Grafana
 resource "aws_iam_role" "grafana" {
-  name = "minicommerce-${var.environment}-grafana-role"
+  count = var.enable_grafana ? 1 : 0
+  name  = "minicommerce-${var.environment}-grafana-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -71,6 +73,8 @@ resource "aws_iam_role" "grafana" {
 
 # IAM Policy Attachment for Grafana to Query AMP
 resource "aws_iam_role_policy_attachment" "grafana_amp" {
-  role       = aws_iam_role.grafana.name
+  count      = var.enable_grafana ? 1 : 0
+  role       = aws_iam_role.grafana[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonPrometheusFullAccess"
 }
+

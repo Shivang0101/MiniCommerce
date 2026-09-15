@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from app.models.product import Product
 from app.schemas.product import ProductCreate
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import asc, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -146,11 +146,16 @@ class ProductRepository:
 
     @staticmethod
     async def update_stock_atomic(db: AsyncSession, product_id: uuid.UUID, quantity: int) -> bool:
-        product = await ProductRepository.get_by_id(db, product_id)
-        if not product or product.stock < quantity:
-            return False
-        product.stock -= quantity
-        return True
+        """Executes atomic SQL UPDATE statement preventing race conditions without holding explicit locks."""
+        stmt = (
+            update(Product)
+            .where(Product.id == product_id)
+            .where(Product.stock >= quantity)
+            .where(Product.is_deleted == False)
+            .values(stock=Product.stock - quantity)
+        )
+        result = await db.execute(stmt)
+        return bool(result.rowcount and result.rowcount > 0)
 
     @staticmethod
     async def get_revenue_window_analytics(db: AsyncSession, limit: int = 20) -> list[dict]:

@@ -8,11 +8,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./minicommerce.db"
     READ_DATABASE_URL: str | None = None
-    JWT_SECRET: str = "supersecretkey_minicommerce_v1_laboratory_key_2026"
+
+    # Database Pool Settings
+    DB_POOL_SIZE: int = 15
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE: int = 1800
+
+    # Security & CORS Settings
+    JWT_SECRET: str = "supersecretkey_minicommerce_v10_laboratory_key_2026"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     REFRESH_COOKIE_NAME: str = "refresh_token"
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ]
+
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_TTL_SECONDS: int = 300
 
