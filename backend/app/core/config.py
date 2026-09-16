@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "sqlite+aiosqlite:///./minicommerce.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:////app/minicommerce.db"
     READ_DATABASE_URL: str | None = None
 
     # Database Pool Settings
