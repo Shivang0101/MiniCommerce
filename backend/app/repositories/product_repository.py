@@ -155,7 +155,7 @@ class ProductRepository:
             .values(stock=Product.stock - quantity)
         )
         result = await db.execute(stmt)
-        return bool(result.rowcount and result.rowcount > 0)
+        return bool(result.rowcount and result.rowcount > 0)  # type: ignore[attr-defined]
 
     @staticmethod
     async def get_revenue_window_analytics(db: AsyncSession, limit: int = 20) -> list[dict]:
