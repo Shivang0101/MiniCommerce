@@ -44,7 +44,7 @@ It serves as a benchmark laboratory for exploring **Infrastructure as Code (Terr
 
 | # | Version | Video Title | Link |
 |---|---------|-------------|------|
-| 🎬 | **Overview** | **MiniCommerce — Full System Architecture Overview** | [![YouTube](https://img.shields.io/badge/▶_Watch-red?style=flat-square&logo=youtube)](https://youtu.be/CMOk4c3myBI) |
+| 🎬 | **Overview** | **MiniCommerce — Full System Architecture Overview** | [![YouTube](https://img.shields.io/badge/▶_Watch-red?style=flat-square&logo=youtube)](https://www.youtube.com/watch?v=CMOk4c3myBI&list=PLfO2FP2kMQYo) |
 | 1 | V1 | Foundation & API Architecture | [![YouTube](https://img.shields.io/badge/▶_Watch-red?style=flat-square&logo=youtube)](https://youtu.be/EYgWDUlEJv4) |
 | 2 | V2 | Database Engineering & High-Concurrency | [![YouTube](https://img.shields.io/badge/▶_Watch-red?style=flat-square&logo=youtube)](https://youtu.be/yJnGCeIrUKw) |
 | 3 | V3 | Containerization & Distributed Caching | [![YouTube](https://img.shields.io/badge/▶_Watch-red?style=flat-square&logo=youtube)](https://youtu.be/CvW56mzBd8c) |
