@@ -68,6 +68,12 @@ services:
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: minicommerce-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.external-url=/prometheus/'
     restart: always
     ports:
       - "9090:9090"
@@ -87,6 +93,8 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(port)s/grafana/
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/etc/grafana/dashboards:ro
@@ -97,7 +105,10 @@ services:
     image: jaegertracing/all-in-one:1.55
     container_name: minicommerce-jaeger
     restart: always
+    environment:
+      - QUERY_BASE_PATH=/jaeger
     ports:
       - "16686:16686"
       - "4317:4317"
       - "4318:4318"
+
