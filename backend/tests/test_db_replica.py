@@ -1,6 +1,6 @@
 import pytest
 from app.core.config import Settings
-from app.db.session import _create_engine, _format_db_url, get_db, get_read_db, get_write_db
+from app.db.session import _format_db_url, get_db, get_read_db, get_write_db
 from sqlalchemy.ext.asyncio import AsyncSession
 
 

@@ -9,10 +9,18 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["get_db", "get_read_db", "get_write_db", "get_current_user", "get_current_admin_user", "require_scope"]
+__all__ = [
+    "get_db",
+    "get_read_db",
+    "get_write_db",
+    "get_current_user",
+    "get_current_admin_user",
+    "require_scope",
+]
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db), token: str = Depends(oauth2_scheme)

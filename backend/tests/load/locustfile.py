@@ -5,9 +5,8 @@ from pathlib import Path
 # Ensure backend root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from locust import HttpUser, between, task
 from app.core.security import create_access_token
-
+from locust import HttpUser, between, task
 
 
 class MiniCommerceUser(HttpUser):
@@ -115,9 +114,9 @@ class MiniCommerceUser(HttpUser):
         }
         checkout_payload = {
             "shipping_address": "123 Cloud Architecture Way, AWS Region us-east-1",
-            "items": [
-                {"product_id": self.sample_product_ids[0], "quantity": 1}
-            ] if self.sample_product_ids else [],
+            "items": [{"product_id": self.sample_product_ids[0], "quantity": 1}]
+            if self.sample_product_ids
+            else [],
         }
 
         with self.client.post(

@@ -11,7 +11,6 @@ import httpx
 from app.core.security import create_access_token
 
 
-
 async def run_chaos_experiment(
     target_url: str = "http://localhost:8000",
     total_requests: int = 150,
@@ -46,7 +45,9 @@ async def run_chaos_experiment(
                 req_start = time.time()
                 try:
                     # 1. Hit Read-Replica / Cache Catalog Endpoint
-                    resp = await client.get(f"{target_url}/api/v1/products/keyset?limit=10", headers=headers)
+                    resp = await client.get(
+                        f"{target_url}/api/v1/products/keyset?limit=10", headers=headers
+                    )
                     duration_ms = (time.time() - req_start) * 1000.0
                     results["latencies_ms"].append(duration_ms)
 
@@ -90,7 +91,9 @@ async def run_chaos_experiment(
     print(f"Status Code Summary:     {results['status_codes']}")
     print("=" * 80)
 
-    assert results["failed"] == 0, f"Chaos test failed: {results['failed']} requests returned errors!"
+    assert results["failed"] == 0, (
+        f"Chaos test failed: {results['failed']} requests returned errors!"
+    )
     print("\n[PASSED] CHAOS EXPERIMENT COMPLETE! 0% HTTP 500 Failures under load.")
 
 

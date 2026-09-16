@@ -4,11 +4,11 @@ from decimal import Decimal
 
 from app.models.base import Base
 from sqlalchemy import (
-    Index,
     UUID,
     Boolean,
     CheckConstraint,
     DateTime,
+    Index,
     Integer,
     Numeric,
     String,

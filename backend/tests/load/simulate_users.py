@@ -5,7 +5,6 @@ catalog browsing, cart operations, and checkouts against MiniCommerce API.
 """
 
 import asyncio
-import os
 import random
 import sys
 import time
@@ -15,8 +14,8 @@ from pathlib import Path
 # Add backend directory to PYTHONPATH
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from httpx import AsyncClient, Limits
 from app.core.security import create_access_token
+from httpx import AsyncClient, Limits
 
 BASE_URL = "http://localhost:8000"
 NUM_USERS = 100
@@ -26,7 +25,7 @@ WORKFLOWS_PER_USER = 3
 async def simulate_virtual_user(user_id: int, client: AsyncClient, results: list):
     """Simulates realistic customer workflow for a unique virtual user."""
     # Stagger initial user arrival to avoid instant rate-limit burst
-    await asyncio.sleep(random.uniform(0, 1.5))
+    await asyncio.sleep(random.uniform(0, 1.5))  # noqa: S311
 
     unique_user_id = str(uuid.uuid4())
     token = create_access_token(subject=unique_user_id)
@@ -37,7 +36,7 @@ async def simulate_virtual_user(user_id: int, client: AsyncClient, results: list
         try:
             # 1. Browse Product Catalog (Consistent query page to test Redis Cache Hit!)
             catalog_resp = await client.get("/api/v1/products?page=1&page_size=10", headers=headers)
-            
+
             # 2. Add Item to Cart
             cart_resp = await client.post(
                 "/api/v1/cart/items",
@@ -57,11 +56,13 @@ async def simulate_virtual_user(user_id: int, client: AsyncClient, results: list
             results.append({"status": "error", "error": str(exc), "latency_ms": latency_ms})
 
         # Pause between actions
-        await asyncio.sleep(random.uniform(0.3, 0.8))
+        await asyncio.sleep(random.uniform(0.3, 0.8))  # noqa: S311
 
 
 async def main():
-    print(f"[LOAD TEST] Launching {NUM_USERS} Unique Authenticated Virtual Users against {BASE_URL}...")
+    print(
+        f"[LOAD TEST] Launching {NUM_USERS} Unique Authenticated Virtual Users against {BASE_URL}..."
+    )
     print("=========================================================================")
 
     # High-concurrency async HTTP client with connection pooling
@@ -70,10 +71,7 @@ async def main():
         results = []
         start = time.time()
 
-        tasks = [
-            simulate_virtual_user(i, client, results)
-            for i in range(1, NUM_USERS + 1)
-        ]
+        tasks = [simulate_virtual_user(i, client, results) for i in range(1, NUM_USERS + 1)]
         await asyncio.gather(*tasks)
 
         total_duration = time.time() - start

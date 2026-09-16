@@ -40,7 +40,7 @@ def _create_engine(url: str) -> AsyncEngine:
     return create_async_engine(formatted_url, **engine_kwargs)
 
 
-# Primary (Master) Database Engine 
+# Primary (Master) Database Engine
 primary_url = settings.DATABASE_URL
 primary_engine = _create_engine(primary_url)
 AsyncSessionPrimary = async_sessionmaker(
@@ -109,5 +109,3 @@ async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
             yield session
         finally:
             await session.close()
-
-

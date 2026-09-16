@@ -1,4 +1,5 @@
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -8,7 +9,7 @@ from app.db.base import Base
 from app.main import app
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-import os
+from sqlalchemy.pool import NullPool
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
@@ -16,12 +17,16 @@ TEST_DATABASE_URL = os.getenv(
 )
 
 connect_args = {}
+pool_class = None
 if "asyncpg" in TEST_DATABASE_URL:
     connect_args = {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    pool_class = NullPool
 
-test_engine = create_async_engine(
-    TEST_DATABASE_URL, echo=False, future=True, connect_args=connect_args
-)
+engine_kwargs = {"echo": False, "future": True, "connect_args": connect_args}
+if pool_class:
+    engine_kwargs["poolclass"] = pool_class
+
+test_engine = create_async_engine(TEST_DATABASE_URL, **engine_kwargs)
 
 TestSessionLocal = async_sessionmaker(
     bind=test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
@@ -56,8 +61,23 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides[get_db] = _get_test_db
     app.dependency_overrides[get_read_db] = _get_test_db
     app.dependency_overrides[get_write_db] = _get_test_db
+
+    # Patch the production engine with the test engine to prevent lifespan
+    # from creating a second conflicting asyncpg connection pool
+    import app.db.session as session_module
+    import app.main as main_module
+
+    original_engine = main_module.engine
+    session_module.engine = test_engine
+    session_module.primary_engine = test_engine
+    main_module.engine = test_engine
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
-    app.dependency_overrides.clear()
 
+    # Restore original engines
+    session_module.engine = original_engine
+    session_module.primary_engine = original_engine
+    main_module.engine = original_engine
+    app.dependency_overrides.clear()

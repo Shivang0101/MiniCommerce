@@ -4,7 +4,17 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.models.base import Base
-from sqlalchemy import Index, UUID, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    UUID,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
